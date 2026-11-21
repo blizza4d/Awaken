@@ -1,0 +1,292 @@
+/* ============================================================================
+   AWAKEN SPATIAL — VISIONOS-INSPIRED SPATIAL UI DESIGN SYSTEM
+   Fluid Typography (clamp), Masked Conic Borders, Depth Glassmorphism
+   ============================================================================ */
+
+@property --border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+:root {
+  /* Fluid Typography Scale (clamp) */
+  --font-display: "Outfit", "Manrope", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "Manrope", "Outfit", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", monospace;
+
+  --text-hero: clamp(2rem, 3.8vw, 3.85rem);
+  --text-subtitle: clamp(0.875rem, 1.15vw, 1.075rem);
+  --text-card-title: clamp(1.25rem, 1.8vw, 1.65rem);
+  --text-card-body: clamp(0.8125rem, 0.92vw, 0.925rem);
+  --text-micro: clamp(0.65rem, 0.72vw, 0.75rem);
+
+  /* Spatial Material Tokens */
+  --spatial-blur: blur(40px) saturate(150%);
+  --spatial-glass-bg: rgba(10, 12, 18, 0.28);
+  --spatial-card-bg: rgba(14, 17, 26, 0.38);
+  --spatial-island-bg: rgba(12, 15, 24, 0.52);
+  --spatial-specular: inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
+    inset 0 -1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ============================================================================
+   LIVE BLURRED SPATIAL BACKDROP (FLOATS ABOVE LIVE 3D WEBGL CANVAS)
+   ============================================================================ */
+.spatial-backdrop-layer {
+  background: radial-gradient(
+    ellipse 85% 75% at 50% 45%,
+    rgba(4, 6, 12, 0.16) 0%,
+    rgba(2, 3, 8, 0.56) 100%
+  );
+  backdrop-filter: blur(40px) saturate(150%);
+  -webkit-backdrop-filter: blur(40px) saturate(150%);
+  will-change: opacity, backdrop-filter;
+}
+
+/* ============================================================================
+   FLUID TYPOGRAPHY & LEGIBILITY TEXT SHADOWS OVER DYNAMIC WEBGL
+   ============================================================================ */
+.spatial-hero-title {
+  font-family: var(--font-display);
+  font-size: var(--text-hero);
+  font-weight: 700;
+  line-height: 1.06;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  text-shadow:
+    0 2px 18px rgba(0, 0, 0, 0.65),
+    0 0 42px rgba(255, 255, 255, 0.16);
+}
+
+.spatial-subtitle {
+  font-family: var(--font-sans);
+  font-size: var(--text-subtitle);
+  line-height: 1.55;
+  color: rgba(241, 245, 249, 0.84);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.72);
+}
+
+.spatial-card-title {
+  font-family: var(--font-display);
+  font-size: var(--text-card-title);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.8);
+}
+
+.spatial-card-body {
+  font-family: var(--font-sans);
+  font-size: var(--text-card-body);
+  line-height: 1.58;
+  color: rgba(226, 232, 240, 0.82);
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.75);
+}
+
+.spatial-micro {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ============================================================================
+   SPATIAL PORTAL CARD — MAGNETIC GLASS + MASKED CONIC MOUSE-TRACKED BORDER
+   ============================================================================ */
+.spatial-card {
+  position: relative;
+  border-radius: 1.75rem;
+  background: var(--spatial-card-bg);
+  backdrop-filter: blur(28px) saturate(165%);
+  -webkit-backdrop-filter: blur(28px) saturate(165%);
+  box-shadow:
+    0 28px 64px -18px rgba(0, 0, 0, 0.72),
+    var(--spatial-specular);
+  transform-style: preserve-3d;
+  will-change: transform;
+  isolation: isolate;
+}
+
+/* Masked Animated Conic + Cursor-Tracking Luminous Border */
+.spatial-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1.5px;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      360px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      var(--accent-primary, #00f0ff) 0%,
+      rgba(255, 255, 255, 0.55) 22%,
+      transparent 65%
+    ),
+    conic-gradient(
+      from var(--border-angle),
+      rgba(255, 255, 255, 0.08) 0deg,
+      var(--accent-primary, #00f0ff) 70deg,
+      rgba(255, 255, 255, 0.05) 140deg,
+      var(--accent-secondary, #a855f7) 240deg,
+      rgba(255, 255, 255, 0.08) 360deg
+    );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.48;
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: spatialBorderSpin 7s linear infinite;
+  z-index: 2;
+}
+
+.spatial-card:hover::before,
+.spatial-card[data-active="true"]::before {
+  opacity: 1;
+}
+
+/* Subtle interior specular glare tracking pointer */
+.spatial-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    420px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+    rgba(255, 255, 255, 0.12) 0%,
+    transparent 62%
+  );
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.spatial-card:hover::after {
+  opacity: 1;
+}
+
+@keyframes spatialBorderSpin {
+  to {
+    --border-angle: 360deg;
+  }
+}
+
+/* ============================================================================
+   FLOATING DYNAMIC ISLAND — COLLAPSIBLE GLASS PILL
+   ============================================================================ */
+.dynamic-island {
+  position: relative;
+  background: var(--spatial-island-bg);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  box-shadow:
+    0 24px 60px -12px rgba(0, 0, 0, 0.8),
+    0 0 36px -6px rgba(0, 240, 255, 0.14),
+    var(--spatial-specular);
+  isolation: isolate;
+}
+
+.dynamic-island::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1.25px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--border-angle),
+    rgba(255, 255, 255, 0.18) 0deg,
+    var(--island-accent, #00f0ff) 90deg,
+    rgba(255, 255, 255, 0.08) 180deg,
+    var(--island-accent-2, #a855f7) 270deg,
+    rgba(255, 255, 255, 0.18) 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.75;
+  animation: spatialBorderSpin 10s linear infinite;
+}
+
+/* Spatial Popover Surface */
+.spatial-popover {
+  background: rgba(10, 12, 20, 0.68);
+  backdrop-filter: blur(42px) saturate(175%);
+  -webkit-backdrop-filter: blur(42px) saturate(175%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 32px 80px -16px rgba(0, 0, 0, 0.85),
+    var(--spatial-specular);
+}
+
+/* ============================================================================
+   WAKE LOCK HALO & INTERACTIVE SHEEN
+   ============================================================================ */
+.wake-halo-active {
+  box-shadow:
+    0 0 18px rgba(16, 185, 129, 0.42),
+    inset 0 0 12px rgba(16, 185, 129, 0.18);
+  animation: wakePulse 2.4s ease-in-out infinite;
+}
+
+@keyframes wakePulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 14px rgba(16, 185, 129, 0.35),
+      inset 0 0 10px rgba(16, 185, 129, 0.15);
+  }
+  50% {
+    box-shadow:
+      0 0 28px rgba(16, 185, 129, 0.72),
+      inset 0 0 16px rgba(16, 185, 129, 0.3);
+  }
+}
+
+.spatial-btn-sheen {
+  position: relative;
+  overflow: hidden;
+}
+
+.spatial-btn-sheen::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -130%;
+  width: 90%;
+  height: 100%;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.42) 50%,
+    transparent 80%
+  );
+  pointer-events: none;
+}
+
+.spatial-btn-sheen:hover::after {
+  animation: sheenGlide 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes sheenGlide {
+  to {
+    left: 160%;
+  }
+}
+
+/* Immersive cursor auto-hide */
+.spatial-hide-cursor,
+.spatial-hide-cursor * {
+  cursor: none !important;
+}

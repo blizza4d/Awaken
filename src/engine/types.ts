@@ -10,6 +10,9 @@ export type SpatialSceneId =
   | 'deep-void-drift'
   | 'midnight-cruise'
   | 'moonlit-shore'
+  | 'arctic-aurora'
+  | 'nocturne-glass'
+  | 'abyssal-drift'
   | 'oled-void';
 
 export interface BloomPreset {

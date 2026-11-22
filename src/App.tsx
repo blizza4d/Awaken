@@ -10,6 +10,24 @@ import { SpatialClockOverlay } from './components/spatial/SpatialClockOverlay';
 import { OledVoidView } from './components/spatial/OledVoidView';
 import { Sparkles, Radio, Eye } from 'lucide-react';
 
+type SpaceCategory = 'all' | 'space' | 'atmosphere' | 'urban' | 'abstract';
+
+const CATEGORY_MAP: Record<SpaceCategory, string[]> = {
+  all: [],
+  space: ['carina-nebula', 'binary-pulsar', 'saturnian-orbit', 'event-horizon', 'deep-void-drift'],
+  atmosphere: ['arctic-aurora', 'moonlit-shore', 'abyssal-drift'],
+  urban: ['volumetric-megacity', 'midnight-cruise', 'nocturne-glass'],
+  abstract: ['fluid-data', 'oled-void'],
+};
+
+const CATEGORIES = [
+  { id: 'all' as const, label: 'All Spaces', count: 13 },
+  { id: 'space' as const, label: 'Space & Cosmos', count: 5 },
+  { id: 'atmosphere' as const, label: 'Atmosphere & Ocean', count: 3 },
+  { id: 'urban' as const, label: 'Urban & Drive', count: 3 },
+  { id: 'abstract' as const, label: 'Abstract & OLED', count: 2 },
+] as const;
+
 export const App: React.FC = () => {
   const {
     activeScene,
@@ -31,7 +49,12 @@ export const App: React.FC = () => {
   } = useSpatialStore();
 
   const [cursorHidden, setCursorHidden] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<SpaceCategory>('all');
   const revealTimerRef = useRef<number | null>(null);
+
+  const filteredScenes = selectedCategory === 'all'
+    ? SPATIAL_SCENES
+    : SPATIAL_SCENES.filter((s) => CATEGORY_MAP[selectedCategory].includes(s.id));
 
   // Auto-hide cursor after 2s of inactivity during immersion or No-HUD
   useEffect(() => {
@@ -278,12 +301,44 @@ export const App: React.FC = () => {
                   </p>
                 </div>
 
-                {/* 7 Flagship Spatial Cards Grid */}
+                {/* Categorized Spaces Filter Bar */}
+                <div className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1">
+                  {CATEGORIES.map((cat) => {
+                    const isSelected = selectedCategory === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={`relative px-3.5 py-1.5 rounded-full text-xs font-display font-semibold transition-all cursor-pointer whitespace-nowrap flex-shrink-0 ${
+                          isSelected
+                            ? 'text-white'
+                            : 'text-white/60 hover:text-white bg-white/[0.04] hover:bg-white/[0.08] border border-white/10'
+                        }`}
+                      >
+                        {isSelected && (
+                          <motion.span
+                            layoutId="activeCategoryPill"
+                            className="absolute inset-0 rounded-full bg-white/15 border border-white/25 shadow-lg backdrop-blur-md"
+                            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                          />
+                        )}
+                        <span className="relative z-10 flex items-center gap-1.5">
+                          <span>{cat.label}</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/10 text-white/80 font-mono">
+                            {cat.count}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* 13 Flagship Spatial Cards Grid */}
                 <section
                   aria-label="Flagship Spatial Environments"
                   className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6"
                 >
-                  {SPATIAL_SCENES.map((scene, idx) => (
+                  {filteredScenes.map((scene, idx) => (
                     <SpatialPortalCard
                       key={scene.id}
                       scene={scene}

@@ -16,6 +16,9 @@ import { SaturnianOrbitScene } from './scenes/SaturnianOrbitScene';
 import { DeepVoidDriftScene } from './scenes/DeepVoidDriftScene';
 import { MidnightCruiseScene } from './scenes/MidnightCruiseScene';
 import { MoonlitShoreScene } from './scenes/MoonlitShoreScene';
+import { ArcticAuroraScene } from './scenes/ArcticAuroraScene';
+import { NocturneGlassScene } from './scenes/NocturneGlassScene';
+import { AbyssalDriftScene } from './scenes/AbyssalDriftScene';
 import {
   ISpatialScene,
   SpatialSceneId,
@@ -149,6 +152,12 @@ export class SpatialEngine {
         return new MidnightCruiseScene();
       case 'moonlit-shore':
         return new MoonlitShoreScene();
+      case 'arctic-aurora':
+        return new ArcticAuroraScene();
+      case 'nocturne-glass':
+        return new NocturneGlassScene();
+      case 'abyssal-drift':
+        return new AbyssalDriftScene();
       case 'oled-void':
         return null;
       default:

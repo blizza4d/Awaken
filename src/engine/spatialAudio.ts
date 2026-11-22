@@ -259,6 +259,85 @@ class SpatialAudioEngine {
       rumble.connect(rumbleGain).connect(this.masterGain);
       rumble.start();
       this.activeNodes.push(rumble, rumbleGain);
+    } else if (sceneId === 'arctic-aurora') {
+      // Ethereal polar wind + crystalline overtone pad
+      const chord = [130.81, 196.0, 261.63, 392.0, 523.25];
+      for (const f of chord) {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now);
+
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(f * 1.2, now);
+        filter.Q.setValueAtTime(2.5, now);
+
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.065, now);
+
+        osc.connect(filter).connect(gain).connect(this.masterGain);
+        osc.start();
+        this.activeNodes.push(osc, filter, gain);
+      }
+    } else if (sceneId === 'nocturne-glass') {
+      // Cozy gentle rain on glass + warm distant city hum
+      const bufferLen = this.ctx.sampleRate * 3;
+      const buffer = this.ctx.createBuffer(1, bufferLen, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let b0 = 0, b1 = 0;
+      for (let i = 0; i < bufferLen; i++) {
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99 * b0 + w * 0.05;
+        b1 = 0.96 * b1 + w * 0.08;
+        data[i] = (b0 + b1) * 0.4;
+      }
+      const rain = this.ctx.createBufferSource();
+      rain.buffer = buffer;
+      rain.loop = true;
+
+      const rainFilter = this.ctx.createBiquadFilter();
+      rainFilter.type = 'bandpass';
+      rainFilter.frequency.setValueAtTime(1200, now);
+      rainFilter.Q.setValueAtTime(0.8, now);
+
+      const rainGain = this.ctx.createGain();
+      rainGain.gain.setValueAtTime(0.15, now);
+
+      const roomHum = this.ctx.createOscillator();
+      roomHum.type = 'triangle';
+      roomHum.frequency.setValueAtTime(65.4, now);
+      const roomGain = this.ctx.createGain();
+      roomGain.gain.setValueAtTime(0.12, now);
+
+      rain.connect(rainFilter).connect(rainGain).connect(this.masterGain);
+      roomHum.connect(roomGain).connect(this.masterGain);
+
+      rain.start();
+      roomHum.start();
+      this.activeNodes.push(rain, rainFilter, rainGain, roomHum, roomGain);
+    } else if (sceneId === 'abyssal-drift') {
+      // Deep ocean sub-bass resonance + bioluminescent chime pad
+      const bassOsc = this.ctx.createOscillator();
+      bassOsc.type = 'sine';
+      bassOsc.frequency.setValueAtTime(38.89, now); // Eb1 sub-bass
+      const bassGain = this.ctx.createGain();
+      bassGain.gain.setValueAtTime(0.24, now);
+
+      bassOsc.connect(bassGain).connect(this.masterGain);
+      bassOsc.start();
+      this.activeNodes.push(bassOsc, bassGain);
+
+      const chimes = [293.66, 440.0, 587.33];
+      for (const f of chimes) {
+        const osc = this.ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f, now);
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(0.045, now);
+        osc.connect(gain).connect(this.masterGain);
+        osc.start();
+        this.activeNodes.push(osc, gain);
+      }
     } else {
       // Fluid Data: Ethereal crystalline binaural harmonic pad
       const freqs = [110, 164.81, 220, 329.63, 440.5];

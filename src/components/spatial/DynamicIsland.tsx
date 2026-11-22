@@ -43,10 +43,23 @@ export const DynamicIsland: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [isHovering, setIsHovering] = useState(false);
   const idleTimerRef = useRef<number | null>(null);
+  const pillsRef = useRef<HTMLDivElement>(null);
+  const activeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const meta = getSceneMeta(activeScene);
   const isOled = activeScene === 'oled-void' || telemetry.isOledVoid;
   const isHiddenByNoHud = noHud && (strictNoHud || !noHudRevealed);
+
+  // Smoothly auto-center the active pill inside the scrollable dock strip
+  useEffect(() => {
+    if (activeBtnRef.current) {
+      activeBtnRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center',
+      });
+    }
+  }, [activeScene, isExpanded]);
 
   // Sync generative Web Audio soundscape with active scene
   useEffect(() => {
@@ -169,15 +182,28 @@ export const DynamicIsland: React.FC = () => {
               transition={{ duration: 0.22 }}
               className="flex items-center gap-1.5 sm:gap-2"
             >
-              {/* Scene Switcher Pills */}
-              <div className="hidden md:flex items-center p-1 rounded-full bg-white/[0.06] border border-white/10 max-w-[48vw] xl:max-w-[56vw] 2xl:max-w-none overflow-x-auto scrollbar-none flex-nowrap">
+              {/* Scene Switcher Pills with Edge Fade Mask & Wheel Scrolling */}
+              <div
+                ref={pillsRef}
+                onWheel={(e) => {
+                  if (pillsRef.current && e.deltaY !== 0) {
+                    pillsRef.current.scrollLeft += e.deltaY * 0.85;
+                  }
+                }}
+                style={{
+                  maskImage: 'linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent)',
+                  WebkitMaskImage: 'linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent)',
+                }}
+                className="hidden md:flex items-center px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 max-w-[36vw] lg:max-w-[46vw] xl:max-w-[56vw] 2xl:max-w-[66vw] overflow-x-auto scrollbar-none flex-nowrap scroll-smooth"
+              >
                 {SPATIAL_SCENES.map((s) => {
                   const selected = s.id === activeScene;
                   return (
                     <button
                       key={s.id}
+                      ref={selected ? (el) => { activeBtnRef.current = el; } : null}
                       onClick={() => setActiveScene(s.id)}
-                      className={`relative px-2.5 py-1 rounded-full text-[11px] font-display font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      className={`relative px-2.5 py-1 rounded-full text-[11px] font-display font-semibold transition-colors cursor-pointer whitespace-nowrap flex-shrink-0 ${
                         selected ? 'text-white' : 'text-slate-300/75 hover:text-white'
                       }`}
                     >

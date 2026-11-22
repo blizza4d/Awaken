@@ -40,6 +40,9 @@ const ALL_SCENE_IDS: SpatialSceneId[] = [
   'deep-void-drift',
   'midnight-cruise',
   'moonlit-shore',
+  'arctic-aurora',
+  'nocturne-glass',
+  'abyssal-drift',
   'oled-void',
 ];
 

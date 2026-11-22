@@ -244,6 +244,172 @@ const BEACH_SAND_FRAG = /* glsl */ `
   }
 `;
 
+// =========================================================================
+// PART 1 SURGICAL FIX: Procedural Lunar Disc, Atmospheric Halo & Pinpoint Stars
+// =========================================================================
+
+// Procedural Lunar Disc Shader with Realistic Lunar Maria & Soft Limb Darkening
+const LUNAR_DISC_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const LUNAR_DISC_FRAG = /* glsl */ `
+  uniform float uTime;
+  varying vec2 vUv;
+
+  float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), f.x),
+      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+      f.y
+    );
+  }
+
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+      v += a * noise(p);
+      p = p * 2.15 + vec2(3.1, 7.4);
+      a *= 0.5;
+    }
+    return v;
+  }
+
+  void main() {
+    vec2 p = (vUv - 0.5) * 2.0;
+    float dist = length(p);
+    if (dist > 1.0) discard;
+
+    // Spherical coordinate reconstruction for 3D hemisphere projection
+    float z = sqrt(max(0.0, 1.0 - dist * dist));
+
+    // Realistic Lunar Maria (dark basalt plains) and bright highland craters
+    vec2 sphereCoord = vec2(atan(p.x, z) * 1.4 + 1.2, asin(p.y) * 1.4);
+    float mariaNoise = fbm(sphereCoord * 2.2);
+    float craterNoise = fbm(sphereCoord * 6.5);
+
+    // Natural lunar contrast
+    float surface = smoothstep(0.28, 0.72, mariaNoise * 0.75 + craterNoise * 0.25);
+
+    // Realistic blackbody warm-silver / cool-white lunar tint (#e8eef7 to #cfd9e8)
+    vec3 colMaria = vec3(0.68, 0.72, 0.78);
+    vec3 colHighlands = vec3(0.92, 0.94, 0.98);
+    vec3 lunarAlbedo = mix(colMaria, colHighlands, surface);
+
+    // Spherical limb darkening (physically grounded falloff toward the edge)
+    float limb = pow(z, 0.42);
+
+    // Slight emissive boost tuned cleanly for UnrealBloomPass (1.28x)
+    vec3 finalMoon = lunarAlbedo * (0.45 + 0.55 * limb) * 1.28;
+
+    // Crisp anti-aliased edge
+    float edgeAlpha = smoothstep(1.0, 0.98, dist);
+
+    gl_FragColor = vec4(finalMoon, edgeAlpha);
+  }
+`;
+
+// Seamless Atmospheric Lunar Halo (Exponential Radial Falloff - Zero Hard Edges)
+const LUNAR_HALO_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const LUNAR_HALO_FRAG = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vec2 p = vUv - 0.5;
+    float dist = length(p);
+
+    // Exponential radial falloff with tight inner core and soft outer reach
+    float glow = exp(-dist * 8.5) * 0.65 + exp(-dist * 22.0) * 0.45;
+
+    // Smooth outer edge fade ensures zero hard polygon edge
+    float edgeFade = smoothstep(0.5, 0.16, dist);
+    float alpha = glow * edgeFade * 0.72;
+
+    vec3 haloColor = vec3(0.72, 0.86, 0.98);
+    gl_FragColor = vec4(haloColor, alpha);
+  }
+`;
+
+// Twilight Starfield Shader: Anti-Aliased Circular Pinpoints with Atmospheric Extinction & Lunar Glare Mask
+const TWILIGHT_STAR_VERT = /* glsl */ `
+  attribute vec3 aColor;
+  attribute float aSize;
+  attribute float aPhase;
+  attribute float aSpeed;
+
+  uniform float uTime;
+  uniform float uPixelRatio;
+  uniform vec3 uMoonPos;
+
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vPhase;
+  varying float vSpeed;
+
+  void main() {
+    vColor = aColor;
+    vPhase = aPhase;
+    vSpeed = aSpeed;
+
+    // Horizon Atmospheric Extinction: smoothly fade star alpha as elevation approaches horizon
+    float horizonFade = smoothstep(4.0, 22.0, position.y);
+
+    // Lunar Glare Mask: stars close to the moon naturally dim from atmospheric scatter
+    float moonDist = length(position.xy - uMoonPos.xy);
+    float lunarGlareMask = smoothstep(10.0, 34.0, moonDist);
+
+    vAlpha = horizonFade * lunarGlareMask;
+
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPos;
+
+    gl_PointSize = clamp(aSize * uPixelRatio * (120.0 / -mvPos.z), 1.2, 5.0);
+  }
+`;
+
+const TWILIGHT_STAR_FRAG = /* glsl */ `
+  uniform float uTime;
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vPhase;
+  varying float vSpeed;
+
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+
+    // Circular Anti-Aliased Pinpoint: tight bright core + soft Gaussian halo
+    float core = exp(-d * d * 28.0);
+    float halo = 0.25 * exp(-d * d * 8.0);
+    float shape = core + halo;
+
+    // Subtle organic scintillation / twinkle
+    float twinkle = 0.78 + 0.22 * sin(uTime * vSpeed + vPhase);
+
+    gl_FragColor = vec4(vColor * (1.0 + core * 0.7), vAlpha * shape * twinkle);
+  }
+`;
+
 export class MoonlitShoreScene implements ISpatialScene {
   public readonly id = 'moonlit-shore' as const;
   public readonly scene: THREE.Scene;
@@ -267,8 +433,11 @@ export class MoonlitShoreScene implements ISpatialScene {
 
   // Celestial Environment
   private moonMesh: THREE.Mesh | null = null;
+  private moonMat: THREE.ShaderMaterial | null = null;
   private moonHaloMesh: THREE.Mesh | null = null;
+  private moonHaloMat: THREE.ShaderMaterial | null = null;
   private starfieldPoints: THREE.Points | null = null;
+  private starfieldMat: THREE.ShaderMaterial | null = null;
 
   // Disposable tracking
   private disposableGeometries: THREE.BufferGeometry[] = [];
@@ -351,50 +520,101 @@ export class MoonlitShoreScene implements ISpatialScene {
     this.beachMesh.position.set(0, -0.6, 15);
     this.scene.add(this.beachMesh);
 
-    // 4. Soft Glowing Moon near the Horizon
-    const moonGeo = new THREE.CircleGeometry(5.2, 32);
-    const moonMat = new THREE.MeshBasicMaterial({ color: 0xf0f9ff });
+    // 4. Procedural Lunar Disc with Realistic Maria, Soft Limb & AA (Writes Depth to occlude stars)
+    const moonGeo = new THREE.PlaneGeometry(12.8, 12.8);
     this.disposableGeometries.push(moonGeo);
-    this.disposableMaterials.push(moonMat);
 
-    this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
+    this.moonMat = new THREE.ShaderMaterial({
+      vertexShader: LUNAR_DISC_VERT,
+      fragmentShader: LUNAR_DISC_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      transparent: true,
+      depthWrite: true,
+    });
+    this.disposableMaterials.push(this.moonMat);
+
+    this.moonMesh = new THREE.Mesh(moonGeo, this.moonMat);
     this.moonMesh.position.copy(moonPos);
+    this.moonMesh.renderOrder = 10; // Renders after starfield and occludes stars behind it
     this.scene.add(this.moonMesh);
 
-    // Soft incandescent atmospheric moon halo
-    const haloGeo = new THREE.CircleGeometry(16.5, 32);
-    const haloMat = new THREE.MeshBasicMaterial({
-      color: 0xbae6fd,
-      transparent: true,
-      opacity: 0.18,
-    });
+    // Seamless Atmospheric Lunar Halo (Exponential Radial Falloff - Zero Hard Edges)
+    const haloGeo = new THREE.PlaneGeometry(95, 95);
     this.disposableGeometries.push(haloGeo);
-    this.disposableMaterials.push(haloMat);
 
-    this.moonHaloMesh = new THREE.Mesh(haloGeo, haloMat);
-    this.moonHaloMesh.position.set(moonPos.x, moonPos.y, moonPos.z - 0.5);
+    this.moonHaloMat = new THREE.ShaderMaterial({
+      vertexShader: LUNAR_HALO_VERT,
+      fragmentShader: LUNAR_HALO_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.disposableMaterials.push(this.moonHaloMat);
+
+    this.moonHaloMesh = new THREE.Mesh(haloGeo, this.moonHaloMat);
+    this.moonHaloMesh.position.set(moonPos.x, moonPos.y, moonPos.z - 0.2);
+    this.moonHaloMesh.renderOrder = 11;
     this.scene.add(this.moonHaloMesh);
 
-    // 5. Twilight Sky Pinpoint Stars
-    const starCount = 1800;
+    // 5. Twilight Sky Pinpoint Stars (Circular Anti-Aliased Pinpoints with Horizon Extinction & Lunar Glare Mask)
+    const starCount = 2200;
     const starGeo = new THREE.BufferGeometry();
     const starPos = new Float32Array(starCount * 3);
-    for (let i = 0; i < starCount; i++) {
-      starPos[i * 3 + 0] = (Math.random() - 0.5) * 360;
-      starPos[i * 3 + 1] = 12 + Math.random() * 95;
-      starPos[i * 3 + 2] = -80 - Math.random() * 160;
-    }
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-    const starMat = new THREE.PointsMaterial({
-      color: 0xe0f2fe,
-      size: 1.4,
-      transparent: true,
-      opacity: 0.65,
-    });
-    this.disposableGeometries.push(starGeo);
-    this.disposableMaterials.push(starMat);
+    const starColors = new Float32Array(starCount * 3);
+    const starSizes = new Float32Array(starCount);
+    const starPhases = new Float32Array(starCount);
+    const starSpeeds = new Float32Array(starCount);
 
-    this.starfieldPoints = new THREE.Points(starGeo, starMat);
+    const blackbodyPalette = [
+      new THREE.Color(0xbfdbfe), // Pale Blue-White (hot O/B-type)
+      new THREE.Color(0xffffff), // Crisp Pure White (A-type)
+      new THREE.Color(0xfef08a), // Faint Warm Amber/Gold (G/K-type)
+    ];
+
+    for (let i = 0; i < starCount; i++) {
+      starPos[i * 3 + 0] = (Math.random() - 0.5) * 380;
+      starPos[i * 3 + 1] = 4 + Math.random() * 110;
+      starPos[i * 3 + 2] = -85 - Math.random() * 180;
+
+      // Power-law magnitude distribution (pow(r, 4.0)) so ~85% of stars are tiny 1-2px pinpoints
+      const r = Math.random();
+      const magnitude = Math.pow(r, 4.0);
+      starSizes[i] = 0.85 + magnitude * 2.4;
+
+      const pickColor = blackbodyPalette[Math.floor(Math.random() * blackbodyPalette.length)];
+      starColors[i * 3 + 0] = pickColor.r;
+      starColors[i * 3 + 1] = pickColor.g;
+      starColors[i * 3 + 2] = pickColor.b;
+
+      starPhases[i] = Math.random() * 6.28318;
+      starSpeeds[i] = 0.8 + Math.random() * 1.8;
+    }
+
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    starGeo.setAttribute('aColor', new THREE.BufferAttribute(starColors, 3));
+    starGeo.setAttribute('aSize', new THREE.BufferAttribute(starSizes, 1));
+    starGeo.setAttribute('aPhase', new THREE.BufferAttribute(starPhases, 1));
+    starGeo.setAttribute('aSpeed', new THREE.BufferAttribute(starSpeeds, 1));
+    this.disposableGeometries.push(starGeo);
+
+    this.starfieldMat = new THREE.ShaderMaterial({
+      vertexShader: TWILIGHT_STAR_VERT,
+      fragmentShader: TWILIGHT_STAR_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+        uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+        uMoonPos: { value: moonPos },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.disposableMaterials.push(this.starfieldMat);
+
+    this.starfieldPoints = new THREE.Points(starGeo, this.starfieldMat);
+    this.starfieldPoints.renderOrder = 1; // Renders first in celestial background
     this.scene.add(this.starfieldPoints);
   }
 
@@ -428,11 +648,23 @@ export class MoonlitShoreScene implements ISpatialScene {
       this.beachMat.uniforms.uTime.value = elapsed;
       this.beachMat.uniforms.uCamPos.value.copy(this.camera.position);
     }
+
+    if (this.moonMat) {
+      this.moonMat.uniforms.uTime.value = elapsed;
+    }
+
+    if (this.starfieldMat) {
+      this.starfieldMat.uniforms.uTime.value = elapsed;
+    }
   }
 
   public resize(width: number, height: number): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+
+    if (this.starfieldMat) {
+      this.starfieldMat.uniforms.uPixelRatio.value = Math.min(window.devicePixelRatio || 1, 2);
+    }
   }
 
   public setQuality(scale: number): void {

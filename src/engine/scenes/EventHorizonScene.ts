@@ -216,6 +216,10 @@ const RAYMARCH_FRAGMENT_SHADER = /* glsl */ `
       finalColor += sampleDeepSpace(dir) * transmittance;
     }
 
+    // Screen-space interleaved gradient dithering prevents color banding in deep gravitational shadows
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.004;
+    finalColor += dither;
+
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
@@ -284,11 +288,11 @@ const PARTICLE_DISK_FRAG = /* glsl */ `
   varying float vAlpha;
 
   void main() {
-    vec2 c = gl_PointCoord * 2.0 - 1.0;
-    float d = dot(c, c);
-    if (d > 1.0) discard;
-    float soft = exp(-d * 3.4);
-    gl_FragColor = vec4(vColor, soft * vAlpha);
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float core = exp(-d * d * 28.0);
+    float halo = 0.28 * exp(-d * d * 8.0);
+    gl_FragColor = vec4(vColor * (1.0 + core * 0.5), (core + halo) * vAlpha);
   }
 `;
 

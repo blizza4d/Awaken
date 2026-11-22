@@ -37,11 +37,11 @@ const STARFIELD_FRAGMENT_SHADER = /* glsl */ `
   varying float vAlpha;
 
   void main() {
-    vec2 p = gl_PointCoord * 2.0 - 1.0;
-    float d = dot(p, p);
-    if (d > 1.0) discard;
-    float core = exp(-d * 4.0);
-    gl_FragColor = vec4(vColor, core * vAlpha);
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float core = exp(-d * d * 28.0);
+    float halo = 0.25 * exp(-d * d * 8.0);
+    gl_FragColor = vec4(vColor * (1.0 + core * 0.7), (core + halo) * vAlpha);
   }
 `;
 
@@ -137,17 +137,25 @@ const NEBULA_FRAGMENT_SHADER = /* glsl */ `
 
     float density = smoothstep(-0.25, 0.65, n1 + n2 * 0.45) * softEdge;
 
-    // Color grading: Deep Indigo -> Cosmic Teal -> Warm Amber Gold
-    float heat = clamp(n1 * 0.85 + n2 * 0.55 + 0.35, 0.0, 1.0);
-    vec3 col = mix(uColorA, uColorB, smoothstep(0.1, 0.55, heat));
-    col = mix(col, uColorC, smoothstep(0.55, 0.95, heat));
+    // Color grading: Deep Indigo -> Cosmic Teal -> Warm Amber Gold with deeper dark absorption lanes
+    float heat = clamp(n1 * 0.95 + n2 * 0.6 + 0.3, 0.0, 1.0);
+    vec3 col = mix(uColorA, uColorB, smoothstep(0.12, 0.52, heat));
+    col = mix(col, uColorC, smoothstep(0.52, 0.92, heat));
 
-    // Localized energetic core boost
-    float coreSparkle = pow(clamp(heat, 0.0, 1.0), 3.0);
-    col += uColorC * coreSparkle * 0.65;
+    // Localized energetic core boost on ion ridges
+    float coreSparkle = pow(clamp(heat, 0.0, 1.0), 3.2);
+    col += uColorC * coreSparkle * 0.75;
 
-    float alpha = density * 0.28;
-    if (alpha < 0.003) discard;
+    // Smooth camera near-fade eliminates popping when camera flies through nebula slabs
+    float camDist = length(vWorldPos - cameraPosition);
+    float nearFade = smoothstep(6.0, 24.0, camDist);
+
+    // Screen-space dithering eliminates 8-bit banding on dark nebula gradients
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.006;
+    col += dither;
+
+    float alpha = density * 0.32 * nearFade;
+    if (alpha < 0.002) discard;
 
     gl_FragColor = vec4(col, alpha);
   }

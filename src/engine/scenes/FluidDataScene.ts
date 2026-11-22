@@ -169,11 +169,12 @@ const FLUID_FRAGMENT_SHADER = /* glsl */ `
   varying vec3 vColor;
   varying float vIntensity;
   varying float vDepth;
-  varying float vDepth;
 
   void main() {
     float fogFactor = smoothstep(36.0, 10.0, vDepth);
-    vec3 finalCol = vColor * fogFactor;
+    // Lightweight screen-space dither prevents banding on dark obsidian void
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.003;
+    vec3 finalCol = (vColor + dither) * fogFactor;
     gl_FragColor = vec4(finalCol, 1.0);
   }
 `;

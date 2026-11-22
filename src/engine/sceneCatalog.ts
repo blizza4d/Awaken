@@ -30,7 +30,7 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#00f0ff', // Cyan
     accentSecondary: '#ec4899', // Magenta
     accentTertiary: '#facc15', // Gold
-    bloom: { strength: 1.2, radius: 0.68, threshold: 0.35 },
+    bloom: { strength: 0.92, radius: 0.54, threshold: 0.52 },
     exposure: 1.08,
   },
   {

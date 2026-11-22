@@ -78,7 +78,9 @@ const WET_ROAD_FRAG = /* glsl */ `
     float tailBeam = smoothstep(9.0, 1.0, tailDist) * smoothstep(2.2, 0.0, abs(vWorldPos.z - uCarPos.z));
     vec3 taillightGlow = vec3(0.95, 0.08, 0.08) * tailBeam * 0.55;
 
-    vec3 finalCol = roadColor + lightAccum + headlightGlow + taillightGlow;
+    // Screen-space interleaved gradient dithering to eliminate 8-bit asphalt banding
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
+    vec3 finalCol = roadColor + lightAccum + headlightGlow + taillightGlow + dither;
     gl_FragColor = vec4(finalCol, 1.0);
   }
 `;
@@ -102,6 +104,130 @@ const HEADLIGHT_CONE_FRAG = /* glsl */ `
     float dust = 0.85 + 0.15 * sin(vUv.x * 24.0 - uTime * 6.0);
     float alpha = lengthFade * widthFade * dust * 0.32;
     gl_FragColor = vec4(1.0, 0.95, 0.85, alpha);
+  }
+`;
+
+// Procedural Lunar Disc Shader with Lunar Maria & Soft Limb Darkening
+const MIDNIGHT_MOON_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const MIDNIGHT_MOON_FRAG = /* glsl */ `
+  varying vec2 vUv;
+
+  float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), f.x),
+      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+      f.y
+    );
+  }
+
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+      v += a * noise(p);
+      p = p * 2.15 + vec2(1.4, 2.7);
+      a *= 0.5;
+    }
+    return v;
+  }
+
+  void main() {
+    vec2 p = vUv * 2.0 - 1.0;
+    float r = length(p);
+    // Smooth anti-aliased lunar disc edge
+    float edge = smoothstep(1.0, 0.965, r);
+    if (edge <= 0.0) discard;
+
+    // Lunar maria crater surface variations
+    float maria = fbm(p * 3.4 + vec2(0.24, 0.51));
+    float craters = noise(p * 9.5) * 0.14;
+
+    // Limb darkening towards circumference
+    float limb = pow(clamp(1.0 - r, 0.0, 1.0), 0.32);
+
+    vec3 highlands = vec3(0.92, 0.96, 1.0);
+    vec3 basalt = vec3(0.68, 0.74, 0.84);
+    vec3 surface = mix(basalt, highlands, smoothstep(0.32, 0.68, maria + craters));
+
+    vec3 finalColor = surface * (0.65 + limb * 0.55);
+    gl_FragColor = vec4(finalColor, edge);
+  }
+`;
+
+// Exponential Atmospheric Moonlight Halo Quad
+const MIDNIGHT_HALO_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const MIDNIGHT_HALO_FRAG = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vec2 p = vUv * 2.0 - 1.0;
+    float r = length(p);
+    float halo = exp(-r * 6.5) * 0.65 + exp(-r * 18.0) * 0.55;
+    float fade = smoothstep(1.0, 0.35, r);
+    float alpha = halo * fade * 0.52;
+    if (alpha < 0.005) discard;
+    vec3 haloCol = vec3(0.68, 0.84, 1.0);
+    gl_FragColor = vec4(haloCol, alpha);
+  }
+`;
+
+// Road Mist Spray Particle System Shader (Circular AA Discard)
+const ROAD_MIST_VERT = /* glsl */ `
+  attribute vec3 aOffset;
+  attribute float aSpeed;
+  attribute float aPhase;
+
+  uniform float uTime;
+  uniform vec3 uCarPos;
+
+  varying float vAlpha;
+
+  void main() {
+    vec3 pos = aOffset;
+    float trailDist = mod(pos.x + uTime * (16.0 + aSpeed * 12.0), 16.0);
+    vec3 worldPos = uCarPos + vec3(-trailDist - 2.0, pos.y + trailDist * 0.08, pos.z);
+
+    float age = trailDist / 16.0;
+    vAlpha = (1.0 - age) * 0.32 * sin(age * 3.14159);
+
+    vec4 mvPos = modelViewMatrix * vec4(worldPos, 1.0);
+    gl_Position = projectionMatrix * mvPos;
+    gl_PointSize = clamp((22.0 + aSpeed * 24.0) * (35.0 / -mvPos.z), 1.0, 48.0);
+  }
+`;
+
+const ROAD_MIST_FRAG = /* glsl */ `
+  varying float vAlpha;
+
+  void main() {
+    vec2 p = gl_PointCoord - 0.5;
+    float d2 = dot(p, p);
+    if (d2 > 0.25) discard;
+    float core = exp(-d2 * 14.0);
+    vec3 mistTint = vec3(0.65, 0.75, 0.9);
+    gl_FragColor = vec4(mistTint, vAlpha * core);
   }
 `;
 
@@ -134,6 +260,10 @@ export class MidnightCruiseScene implements ISpatialScene {
   private treeGroup = new THREE.Group();
   private skylineGroup = new THREE.Group();
   private moonMesh: THREE.Mesh | null = null;
+  private moonHaloMesh: THREE.Mesh | null = null;
+  private carPassingLight: THREE.PointLight | null = null;
+  private roadMistPoints: THREE.Points | null = null;
+  private roadMistMat: THREE.ShaderMaterial | null = null;
 
   // Resource Tracking
   private disposableGeometries: THREE.BufferGeometry[] = [];
@@ -162,6 +292,49 @@ export class MidnightCruiseScene implements ISpatialScene {
 
     // 2. Build the Sleek Minimalist Car Silhouette
     this.buildCar();
+
+    // 2b. Road Mist & Tire Spray Particle System (Circular AA Discard)
+    const mistCount = 320;
+    const mistGeo = new THREE.BufferGeometry();
+    const mistOffsets = new Float32Array(mistCount * 3);
+    const mistSpeeds = new Float32Array(mistCount);
+    const mistPhases = new Float32Array(mistCount);
+
+    for (let i = 0; i < mistCount; i++) {
+      mistOffsets[i * 3 + 0] = Math.random() * 16.0;
+      mistOffsets[i * 3 + 1] = 0.08 + Math.random() * 0.45;
+      mistOffsets[i * 3 + 2] = (Math.random() - 0.5) * 2.8;
+      mistSpeeds[i] = Math.random();
+      mistPhases[i] = Math.random();
+    }
+
+    mistGeo.setAttribute('position', new THREE.BufferAttribute(mistOffsets, 3));
+    mistGeo.setAttribute('aOffset', new THREE.BufferAttribute(mistOffsets, 3));
+    mistGeo.setAttribute('aSpeed', new THREE.BufferAttribute(mistSpeeds, 1));
+    mistGeo.setAttribute('aPhase', new THREE.BufferAttribute(mistPhases, 1));
+    this.disposableGeometries.push(mistGeo);
+
+    this.roadMistMat = new THREE.ShaderMaterial({
+      vertexShader: ROAD_MIST_VERT,
+      fragmentShader: ROAD_MIST_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+        uCarPos: { value: this.carGroup.position },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.disposableMaterials.push(this.roadMistMat);
+
+    this.roadMistPoints = new THREE.Points(mistGeo, this.roadMistMat);
+    this.roadMistPoints.frustumCulled = false;
+    this.scene.add(this.roadMistPoints);
+
+    // 2c. Dynamic Streetlight Specular Sweep Light for Car Body & Glass
+    this.carPassingLight = new THREE.PointLight(0xffaa33, 0, 16, 1.8);
+    this.carPassingLight.position.set(0, 4.2, -2.8);
+    this.scene.add(this.carPassingLight);
 
     // 3. Wet Highway Asphalt Road
     const roadGeo = new THREE.PlaneGeometry(ROAD_LENGTH, ROAD_WIDTH, 12, 12);
@@ -415,15 +588,37 @@ export class MidnightCruiseScene implements ISpatialScene {
     }
     this.scene.add(this.skylineGroup);
 
-    // Glowing Moon in the Night Sky
-    const moonGeo = new THREE.CircleGeometry(4.2, 24);
-    const moonMat = new THREE.MeshBasicMaterial({ color: 0xe0f2fe });
+    // Glowing Procedural Moon & Soft Atmospheric Halo
+    const moonGeo = new THREE.PlaneGeometry(9.2, 9.2);
+    const moonMat = new THREE.ShaderMaterial({
+      vertexShader: MIDNIGHT_MOON_VERT,
+      fragmentShader: MIDNIGHT_MOON_FRAG,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
     this.disposableGeometries.push(moonGeo);
     this.disposableMaterials.push(moonMat);
 
     this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
     this.moonMesh.position.set(38, 36, -140);
     this.scene.add(this.moonMesh);
+
+    const haloGeo = new THREE.PlaneGeometry(36, 36);
+    const haloMat = new THREE.ShaderMaterial({
+      vertexShader: MIDNIGHT_HALO_VERT,
+      fragmentShader: MIDNIGHT_HALO_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.disposableGeometries.push(haloGeo);
+    this.disposableMaterials.push(haloMat);
+
+    this.moonHaloMesh = new THREE.Mesh(haloGeo, haloMat);
+    this.moonHaloMesh.position.set(38, 36, -141);
+    this.scene.add(this.moonHaloMesh);
   }
 
   public update(delta: number, elapsed: number, pointer: THREE.Vector2): void {
@@ -513,6 +708,37 @@ export class MidnightCruiseScene implements ISpatialScene {
       const hcMat = this.headlightCone.material as THREE.ShaderMaterial;
       hcMat.uniforms.uTime.value = elapsed;
     }
+
+    // 8. Dynamic streetlight specular sweep across car paint & greenhouse glass
+    let minAbsX = 999;
+    let closestX = 0;
+    let closestIsAmber = true;
+    for (let i = 0; i < this.streetlightGroup.children.length; i++) {
+      const sl = this.streetlightGroup.children[i];
+      const absX = Math.abs(sl.position.x);
+      if (absX < minAbsX) {
+        minAbsX = absX;
+        closestX = sl.position.x;
+        closestIsAmber = i % 2 === 0;
+      }
+    }
+
+    if (this.carPassingLight) {
+      this.carPassingLight.position.set(closestX, 4.2, -2.8);
+      this.carPassingLight.color.set(closestIsAmber ? 0xffaa33 : 0x93c5fd);
+      const sweepFactor = Math.exp(-minAbsX * minAbsX * 0.08);
+      this.carPassingLight.intensity = sweepFactor * 52.0;
+    }
+
+    // Update road mist spray
+    if (this.roadMistMat) {
+      this.roadMistMat.uniforms.uTime.value = elapsed;
+      this.roadMistMat.uniforms.uCarPos.value.copy(this.carGroup.position);
+    }
+
+    // Billboard procedural moon and exponential halo
+    if (this.moonMesh) this.moonMesh.lookAt(this.camera.position);
+    if (this.moonHaloMesh) this.moonHaloMesh.lookAt(this.camera.position);
   }
 
   public resize(width: number, height: number): void {
@@ -531,7 +757,8 @@ export class MidnightCruiseScene implements ISpatialScene {
       TREE_COUNT +
       SKYLINE_BUILDING_COUNT +
       this.wheels.length +
-      6
+      (this.roadMistPoints ? 320 : 0) +
+      8
     );
   }
 
@@ -551,6 +778,22 @@ export class MidnightCruiseScene implements ISpatialScene {
       this.scene.remove(this.moonMesh);
       this.moonMesh = null;
     }
+
+    if (this.moonHaloMesh) {
+      this.scene.remove(this.moonHaloMesh);
+      this.moonHaloMesh = null;
+    }
+
+    if (this.carPassingLight) {
+      this.scene.remove(this.carPassingLight);
+      this.carPassingLight = null;
+    }
+
+    if (this.roadMistPoints) {
+      this.scene.remove(this.roadMistPoints);
+      this.roadMistPoints = null;
+    }
+    this.roadMistMat = null;
 
     for (const geo of this.disposableGeometries) {
       geo.dispose();

@@ -33,16 +33,19 @@ const NEUTRON_STAR_FRAG = /* glsl */ `
     vec3 viewDir = normalize(vViewPosition);
 
     // Fresnel edge emission
-    float fresnel = 1.0 - max(dot(viewDir, normal), 0.0);
-    float rim = pow(fresnel, 2.8);
+    float nDotV = max(dot(viewDir, normal), 0.0);
+    float fresnel = 1.0 - nDotV;
+    float rim = pow(fresnel, 2.5);
 
     // High-frequency magnetic turbulence ripple
     float ripple = 0.5 + 0.5 * sin(vUv.y * 36.0 + uTime * uPulseRate + sin(vUv.x * 24.0) * 2.0);
-    float pulse = 0.85 + 0.35 * sin(uTime * uPulseRate * 1.8);
+    float pulse = 0.88 + 0.22 * sin(uTime * uPulseRate * 1.8);
 
-    vec3 emissive = mix(uCoreColor, uLimbColor, rim) * (1.8 + ripple * 0.8) * pulse;
-    // Ultra-bright stellar core highlight
-    emissive += vec3(1.0) * pow(max(dot(viewDir, normal), 0.0), 4.0) * 0.9;
+    // Preserved distinct chromatic identity per star core (prevents bloom blowout merge)
+    float coreFalloff = pow(nDotV, 1.6);
+    vec3 emissive = mix(uLimbColor, uCoreColor, coreFalloff * 0.82 + 0.18) * (1.15 + ripple * 0.32) * pulse;
+    emissive += uCoreColor * pow(nDotV, 5.5) * 0.75;
+    emissive += uLimbColor * rim * 1.25;
 
     gl_FragColor = vec4(emissive, 1.0);
   }
@@ -101,11 +104,11 @@ const JET_BEAM_FRAG = /* glsl */ `
   varying float vAlpha;
 
   void main() {
-    vec2 p = gl_PointCoord * 2.0 - 1.0;
-    float d = dot(p, p);
-    if (d > 1.0) discard;
-    float core = exp(-d * 3.5);
-    gl_FragColor = vec4(vColor, core * vAlpha);
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float core = exp(-d * d * 28.0);
+    float halo = 0.28 * exp(-d * d * 8.0);
+    gl_FragColor = vec4(vColor * (1.0 + core * 0.8), (core + halo) * vAlpha);
   }
 `;
 
@@ -159,11 +162,11 @@ const ACCRETION_BRIDGE_FRAG = /* glsl */ `
   varying float vAlpha;
 
   void main() {
-    vec2 p = gl_PointCoord * 2.0 - 1.0;
-    float d = dot(p, p);
-    if (d > 1.0) discard;
-    float soft = exp(-d * 3.8);
-    gl_FragColor = vec4(vColor, soft * vAlpha);
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float core = exp(-d * d * 24.0);
+    float halo = 0.3 * exp(-d * d * 8.0);
+    gl_FragColor = vec4(vColor * (1.0 + core * 0.5), (core + halo) * vAlpha);
   }
 `;
 
@@ -172,11 +175,11 @@ export class BinaryPulsarScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 1.2,
-    radius: 0.68,
-    threshold: 0.35,
+    strength: 0.92,
+    radius: 0.54,
+    threshold: 0.52,
   };
-  public readonly exposure = 1.08;
+  public readonly exposure = 1.05;
 
   // Star A (Primary Magnetar / Pulsar)
   private starAMesh: THREE.Mesh | null = null;

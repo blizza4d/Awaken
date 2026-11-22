@@ -36,8 +36,10 @@ const RAIN_VERTEX_SHADER = /* glsl */ `
   uniform vec3 uWind;
 
   varying float vAlpha;
+  varying vec2 vUv;
 
   void main() {
+    vUv = uv;
     vec3 boxSize = vec3(110.0, 95.0, 140.0);
 
     // Advect raindrop downward and along wind vector
@@ -66,9 +68,15 @@ const RAIN_VERTEX_SHADER = /* glsl */ `
 const RAIN_FRAGMENT_SHADER = /* glsl */ `
   uniform vec3 uRainTint;
   varying float vAlpha;
+  varying vec2 vUv;
 
   void main() {
-    gl_FragColor = vec4(uRainTint, vAlpha);
+    // Soft anti-aliased elliptical profile along streak to eliminate square edges
+    float x = abs(vUv.x - 0.5) * 2.0;
+    float y = abs(vUv.y - 0.5) * 2.0;
+    float profile = clamp((1.0 - x * x) * (1.0 - y * y * y * y), 0.0, 1.0);
+    if (profile <= 0.01) discard;
+    gl_FragColor = vec4(uRainTint, vAlpha * profile);
   }
 `;
 
@@ -98,15 +106,60 @@ const SPLASH_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
   varying float vLife;
 
+  float screenDither(vec2 fc) {
+    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
+  }
+
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
     float d = length(p);
-    // Crisp expanding circular water ripple ring
-    float ring = smoothstep(0.08, 0.0, abs(d - vLife * 0.85));
+    if (d > 1.0) discard;
+    // Crisp expanding circular water ripple ring with soft AA edges
+    float ring = smoothstep(0.09, 0.0, abs(d - vLife * 0.85));
     float alpha = ring * (1.0 - vLife) * 0.72;
     if (alpha < 0.01) discard;
     vec3 col = mix(vec3(0.45, 0.92, 1.0), vec3(0.95, 0.45, 0.85), vLife);
+    col += screenDither(gl_FragCoord.xy);
     gl_FragColor = vec4(col * 1.4, alpha);
+  }
+`;
+
+const BEACON_VERTEX_SHADER = /* glsl */ `
+  attribute vec3 aBeaconPos;
+  attribute float aBeaconPhase;
+  attribute float aIsAmber;
+
+  uniform float uTime;
+
+  varying vec3 vColor;
+  varying float vFlash;
+
+  void main() {
+    // Sharp rhythmic aviation obstruction strobe flashing
+    float cycle = fract(uTime * 1.15 + aBeaconPhase);
+    float flash1 = smoothstep(0.0, 0.03, cycle) * smoothstep(0.14, 0.08, cycle);
+    float flash2 = smoothstep(0.20, 0.23, cycle) * smoothstep(0.34, 0.28, cycle);
+    float strobe = flash1 * 1.0 + flash2 * 0.75;
+
+    vFlash = 0.22 + strobe * 2.8;
+    vec3 red = vec3(1.0, 0.08, 0.08);
+    vec3 amber = vec3(1.0, 0.68, 0.12);
+    vColor = mix(red, amber, aIsAmber);
+
+    // Expand beacon silhouette slightly during strobe
+    vec3 localPos = position * (1.0 + strobe * 0.5);
+    vec3 worldPos = aBeaconPos + localPos;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
+  }
+`;
+
+const BEACON_FRAGMENT_SHADER = /* glsl */ `
+  varying vec3 vColor;
+  varying float vFlash;
+
+  void main() {
+    gl_FragColor = vec4(vColor * vFlash, 1.0);
   }
 `;
 
@@ -252,6 +305,8 @@ export class VolumetricMegacityScene implements ISpatialScene {
   public readonly exposure = 1.04;
 
   private buildingsMesh: THREE.InstancedMesh | null = null;
+  private spiresMesh: THREE.InstancedMesh | null = null;
+  private beaconsMesh: THREE.InstancedMesh | null = null;
   private neonSignsMesh: THREE.InstancedMesh | null = null;
   private trafficMesh: THREE.InstancedMesh | null = null;
   private rainMesh: THREE.InstancedMesh | null = null;
@@ -267,6 +322,7 @@ export class VolumetricMegacityScene implements ISpatialScene {
 
   private rainMaterial: THREE.ShaderMaterial | null = null;
   private splashMaterial: THREE.ShaderMaterial | null = null;
+  private beaconMaterial: THREE.ShaderMaterial | null = null;
   private droneLights: THREE.PointLight[] = [];
 
   private dummy = new THREE.Object3D();
@@ -365,6 +421,76 @@ export class VolumetricMegacityScene implements ISpatialScene {
     this.buildingsMesh.instanceMatrix.needsUpdate = true;
     if (this.buildingsMesh.instanceColor) this.buildingsMesh.instanceColor.needsUpdate = true;
     this.scene.add(this.buildingsMesh);
+
+    // 3b. Rooftop Spires with Blinking Aviation Obstruction Beacons for Monumental Megastructures
+    const spireBuildings = this.buildingData.filter((b) => b.hasSpire);
+    const spireCount = spireBuildings.length;
+
+    if (spireCount > 0) {
+      const spireGeo = new THREE.CylinderGeometry(0.12, 0.75, 1, 6);
+      spireGeo.translate(0, 0.5, 0); // Anchor at base
+      this.disposableGeometries.push(spireGeo);
+
+      const spireMat = new THREE.MeshStandardMaterial({
+        color: 0x161d2d,
+        roughness: 0.35,
+        metalness: 0.85,
+      });
+      this.disposableMaterials.push(spireMat);
+
+      this.spiresMesh = new THREE.InstancedMesh(spireGeo, spireMat, spireCount);
+
+      const beaconGeo = new THREE.SphereGeometry(0.48, 8, 8);
+      this.disposableGeometries.push(beaconGeo);
+
+      const beaconPositions = new Float32Array(spireCount * 3);
+      const beaconPhases = new Float32Array(spireCount);
+      const isAmberAttrs = new Float32Array(spireCount);
+
+      for (let i = 0; i < spireCount; i++) {
+        const b = spireBuildings[i];
+        const spireH = 14 + Math.random() * 18;
+
+        this.dummy.position.set(b.x, b.height, b.z);
+        this.dummy.scale.set(1, spireH, 1);
+        this.dummy.rotation.set(0, 0, 0);
+        this.dummy.updateMatrix();
+        this.spiresMesh.setMatrixAt(i, this.dummy.matrix);
+
+        beaconPositions[i * 3 + 0] = b.x;
+        beaconPositions[i * 3 + 1] = b.height + spireH + 0.25;
+        beaconPositions[i * 3 + 2] = b.z;
+        beaconPhases[i] = Math.random();
+        isAmberAttrs[i] = i % 3 === 0 ? 1.0 : 0.0; // 33% amber, 67% aviation red
+      }
+
+      this.spiresMesh.instanceMatrix.needsUpdate = true;
+      this.scene.add(this.spiresMesh);
+
+      beaconGeo.setAttribute('aBeaconPos', new THREE.InstancedBufferAttribute(beaconPositions, 3));
+      beaconGeo.setAttribute('aBeaconPhase', new THREE.InstancedBufferAttribute(beaconPhases, 1));
+      beaconGeo.setAttribute('aIsAmber', new THREE.InstancedBufferAttribute(isAmberAttrs, 1));
+
+      this.beaconMaterial = new THREE.ShaderMaterial({
+        vertexShader: BEACON_VERTEX_SHADER,
+        fragmentShader: BEACON_FRAGMENT_SHADER,
+        uniforms: {
+          uTime: { value: 0 },
+        },
+        transparent: false,
+        toneMapped: false,
+      });
+      this.disposableMaterials.push(this.beaconMaterial);
+
+      this.beaconsMesh = new THREE.InstancedMesh(beaconGeo, this.beaconMaterial, spireCount);
+      this.beaconsMesh.frustumCulled = false;
+      const idMat = new THREE.Matrix4();
+      for (let i = 0; i < spireCount; i++) {
+        this.beaconsMesh.setMatrixAt(i, idMat);
+      }
+      this.beaconsMesh.instanceMatrix.needsUpdate = true;
+      this.scene.add(this.beaconsMesh);
+    }
 
     // 4. Instanced Glowing Neon Billboards & Rooftop Trim Bands
     const signGeo = new THREE.BoxGeometry(1, 1, 0.35);
@@ -644,6 +770,11 @@ export class VolumetricMegacityScene implements ISpatialScene {
     if (this.splashMaterial) {
       this.splashMaterial.uniforms.uTime.value = elapsed;
     }
+
+    // Update aviation obstruction beacon flashes
+    if (this.beaconMaterial) {
+      this.beaconMaterial.uniforms.uTime.value = elapsed;
+    }
   }
 
   public resize(width: number, height: number): void {
@@ -664,6 +795,8 @@ export class VolumetricMegacityScene implements ISpatialScene {
   public getActiveInstanceCount(): number {
     return (
       BUILDING_COUNT +
+      (this.spiresMesh?.count ?? 0) +
+      (this.beaconsMesh?.count ?? 0) +
       NEON_SIGN_COUNT +
       TRAFFIC_COUNT +
       Math.floor((RAIN_COUNT + SPLASH_COUNT) * this.qualityScale)
@@ -673,6 +806,8 @@ export class VolumetricMegacityScene implements ISpatialScene {
   public dispose(): void {
     [
       this.buildingsMesh,
+      this.spiresMesh,
+      this.beaconsMesh,
       this.neonSignsMesh,
       this.trafficMesh,
       this.rainMesh,
@@ -703,12 +838,15 @@ export class VolumetricMegacityScene implements ISpatialScene {
     this.trafficData = [];
     this.droneLights = [];
     this.buildingsMesh = null;
+    this.spiresMesh = null;
+    this.beaconsMesh = null;
     this.neonSignsMesh = null;
     this.trafficMesh = null;
     this.rainMesh = null;
     this.splashMesh = null;
     this.rainMaterial = null;
     this.splashMaterial = null;
+    this.beaconMaterial = null;
 
     this.scene.clear();
   }

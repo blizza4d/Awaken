@@ -105,7 +105,9 @@ const SATURN_PLANET_FRAG = /* glsl */ `
     // Ambient nightside starlight scatter
     vec3 nightAmbient = vec3(0.015, 0.018, 0.026);
 
-    vec3 finalColor = surfaceColor * (directLight * ringShadow) + nightAmbient + (rimColor * rimGlow * 0.95);
+    // Screen-space dithering eliminates 8-bit banding across the gas giant terminator
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.005;
+    vec3 finalColor = surfaceColor * (directLight * ringShadow) + nightAmbient + (rimColor * rimGlow * 0.95) + dither;
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
@@ -163,9 +165,37 @@ const SATURN_RING_FRAG = /* glsl */ `
     }
 
     vec3 ringIceCol = mix(vec3(0.92, 0.84, 0.68), vec3(0.96, 0.92, 0.84), microRings);
-    vec3 litColor = ringIceCol * (planetShadow * 0.92 + 0.08);
+
+    // Screen-space dither prevents color quantization on shadow transition
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.004;
+    vec3 litColor = ringIceCol * (planetShadow * 0.92 + 0.08) + dither;
 
     gl_FragColor = vec4(litColor, bandAlpha);
+  }
+`;
+
+const SATURN_STAR_VERT = /* glsl */ `
+  attribute vec3 aColor;
+  uniform float uPixelRatio;
+  varying vec3 vColor;
+
+  void main() {
+    vColor = aColor;
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mvPos;
+    gl_PointSize = clamp(2.2 * uPixelRatio * (160.0 / -mvPos.z), 1.2, 4.5);
+  }
+`;
+
+const SATURN_STAR_FRAG = /* glsl */ `
+  varying vec3 vColor;
+
+  void main() {
+    float d = length(gl_PointCoord - 0.5);
+    if (d > 0.5) discard;
+    float core = exp(-d * d * 28.0);
+    float halo = 0.25 * exp(-d * d * 8.0);
+    gl_FragColor = vec4(vColor * (1.0 + core * 0.6), (core + halo) * 0.92);
   }
 `;
 
@@ -190,7 +220,7 @@ export class SaturnianOrbitScene implements ISpatialScene {
 
   private starfieldPoints: THREE.Points | null = null;
   private starfieldGeo: THREE.BufferGeometry | null = null;
-  private starfieldMat: THREE.PointsMaterial | null = null;
+  private starfieldMat: THREE.ShaderMaterial | null = null;
 
   private smoothPointer = new THREE.Vector2();
   private sunDir = new THREE.Vector3(0.85, 0.24, -0.45).normalize();
@@ -231,11 +261,16 @@ export class SaturnianOrbitScene implements ISpatialScene {
     }
 
     this.starfieldGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.starfieldGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    this.starfieldMat = new THREE.PointsMaterial({
-      size: 1.15,
-      vertexColors: true,
-      sizeAttenuation: false,
+    this.starfieldGeo.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+    this.starfieldMat = new THREE.ShaderMaterial({
+      vertexShader: SATURN_STAR_VERT,
+      fragmentShader: SATURN_STAR_FRAG,
+      uniforms: {
+        uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
     this.starfieldPoints = new THREE.Points(this.starfieldGeo, this.starfieldMat);
     this.scene.add(this.starfieldPoints);
@@ -316,6 +351,9 @@ export class SaturnianOrbitScene implements ISpatialScene {
   public resize(width: number, height: number): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+    if (this.starfieldMat) {
+      this.starfieldMat.uniforms.uPixelRatio.value = Math.min(window.devicePixelRatio || 1, 2);
+    }
   }
 
   public setQuality(_scale: number): void {

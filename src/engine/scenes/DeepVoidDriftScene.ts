@@ -111,6 +111,10 @@ const VOID_DUST_FRAG = /* glsl */ `
     return v;
   }
 
+  float screenDither(vec2 fc) {
+    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
+  }
+
   void main() {
     vec2 uv = vUv;
     vec2 centered = uv - 0.5;
@@ -124,6 +128,7 @@ const VOID_DUST_FRAG = /* glsl */ `
     vec3 baseVoid = vec3(0.004, 0.008, 0.018) * clamp(vignette, 0.0, 1.0);
 
     vec3 finalColor = baseVoid + dustColor;
+    finalColor += screenDither(gl_FragCoord.xy);
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
@@ -141,6 +146,10 @@ const GALAXY_SMUDGE_FRAG = /* glsl */ `
   uniform float uTime;
   varying vec2 vUv;
 
+  float screenDither(vec2 fc) {
+    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
+  }
+
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
     float r = length(p);
@@ -156,8 +165,183 @@ const GALAXY_SMUDGE_FRAG = /* glsl */ `
     vec3 coreColor = vec3(0.95, 0.88, 0.72);
     vec3 armColor = vec3(0.35, 0.65, 0.95);
     vec3 col = mix(armColor, coreColor, core / max(core + arms, 0.001));
+    col += screenDither(gl_FragCoord.xy);
 
     gl_FragColor = vec4(col * 0.65, alpha * 0.42);
+  }
+`;
+
+// Procedural Stellar Sphere Shader with Limb Darkening
+const STELLAR_SPHERE_VERT = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  varying vec2 vUv;
+
+  void main() {
+    vUv = uv;
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    vViewDir = normalize(-mvPos.xyz);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+
+const STELLAR_SPHERE_FRAG = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uTime;
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  varying vec2 vUv;
+
+  float hash(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
+  }
+
+  void main() {
+    float NdotV = max(0.0, dot(vNormal, vViewDir));
+    float limb = pow(NdotV, 0.45);
+    float grain = hash(vUv * 48.0 + fract(uTime * 0.03)) * 0.12;
+    vec3 col = uColor * (0.88 + grain + pow(NdotV, 1.8) * 0.65);
+    gl_FragColor = vec4(col * (0.75 + limb * 0.85), 1.0);
+  }
+`;
+
+// Optical 4-Point Telescope Diffraction Flare Spike Quad
+const DIFFRACTION_SPIKE_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const DIFFRACTION_SPIKE_FRAG = /* glsl */ `
+  uniform vec3 uColor;
+  varying vec2 vUv;
+
+  void main() {
+    vec2 p = vUv * 2.0 - 1.0;
+    // Sharp 4-point telescope diffraction spikes along X and Y axes
+    float spikeX = exp(-abs(p.y) * 48.0) * exp(-abs(p.x) * 3.8);
+    float spikeY = exp(-abs(p.x) * 48.0) * exp(-abs(p.y) * 3.8);
+    // Soft diagonal secondary flare
+    float diag1 = exp(-abs(p.x + p.y) * 55.0) * exp(-abs(p.x - p.y) * 5.0) * 0.22;
+    float diag2 = exp(-abs(p.x - p.y) * 55.0) * exp(-abs(p.x + p.y) * 5.0) * 0.22;
+    // Central incandescent glare core
+    float r = length(p);
+    float core = exp(-r * r * 38.0) * 1.5;
+    float halo = exp(-r * 7.5) * 0.45;
+
+    float intensity = spikeX + spikeY + diag1 + diag2 + core + halo;
+    float alpha = clamp(intensity, 0.0, 1.0);
+    if (alpha < 0.005) discard;
+
+    gl_FragColor = vec4(uColor * (1.2 + core * 1.4), alpha);
+  }
+`;
+
+// Red Giant Convective Boiling Granulation Shader
+const RED_GIANT_VERT = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  varying vec2 vUv;
+  varying vec3 vPosition;
+
+  void main() {
+    vUv = uv;
+    vPosition = position;
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    vViewDir = normalize(-mvPos.xyz);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`;
+
+const RED_GIANT_FRAG = /* glsl */ `
+  uniform float uTime;
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  varying vec2 vUv;
+  varying vec3 vPosition;
+
+  float hash(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+
+  float noise(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(hash(p + vec3(0,0,0)), hash(p + vec3(1,0,0)), f.x),
+          mix(hash(p + vec3(0,1,0)), hash(p + vec3(1,1,0)), f.x), f.y),
+      mix(mix(hash(p + vec3(0,0,1)), hash(p + vec3(1,0,1)), f.x),
+          mix(hash(p + vec3(0,1,1)), hash(p + vec3(1,1,1)), f.x), f.y),
+      f.z
+    );
+  }
+
+  float fbm(vec3 p) {
+    float v = 0.0;
+    float a = 0.5;
+    for (int i = 0; i < 4; i++) {
+      v += a * noise(p);
+      p = p * 2.08;
+      a *= 0.5;
+    }
+    return v;
+  }
+
+  void main() {
+    float NdotV = max(0.0, dot(vNormal, vViewDir));
+    float limb = pow(NdotV, 0.42);
+
+    // Convective boiling granulation cells on photospheric surface
+    vec3 samplePos = vPosition * 4.2 + vec3(uTime * 0.04, uTime * 0.03, uTime * 0.02);
+    float cells = fbm(samplePos);
+    float fineGrain = noise(vPosition * 18.0 + uTime * 0.08) * 0.18;
+
+    // Red giant photospheric palette: deep carbon crimson, convective orange, brilliant gold filaments
+    vec3 darkSpot = vec3(0.55, 0.05, 0.02);
+    vec3 photosphere = vec3(0.96, 0.32, 0.04);
+    vec3 hotFilament = vec3(1.0, 0.78, 0.35);
+
+    vec3 surfaceColor = mix(darkSpot, photosphere, smoothstep(0.25, 0.65, cells));
+    surfaceColor = mix(surfaceColor, hotFilament, smoothstep(0.68, 0.88, cells + fineGrain));
+
+    // Coronal limb glow (warm crimson/gold rim)
+    float rim = pow(1.0 - NdotV, 2.2);
+    vec3 rimColor = vec3(1.0, 0.25, 0.05) * rim * 1.8;
+
+    vec3 finalCol = surfaceColor * (0.45 + limb * 0.85) + rimColor;
+    gl_FragColor = vec4(finalCol, 1.0);
+  }
+`;
+
+// Red Giant Coronal Atmospheric Halo Quad
+const CORONA_HALO_VERT = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const CORONA_HALO_FRAG = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vec2 p = vUv * 2.0 - 1.0;
+    float r = length(p);
+    float halo = exp(-r * 4.8) * 0.65 + exp(-r * 12.0) * 0.55;
+    float fade = smoothstep(1.0, 0.4, r);
+    float alpha = halo * fade * 0.48;
+    if (alpha < 0.005) discard;
+    vec3 haloCol = mix(vec3(1.0, 0.28, 0.05), vec3(1.0, 0.65, 0.15), exp(-r * 6.0));
+    gl_FragColor = vec4(haloCol * 1.3, alpha);
   }
 `;
 
@@ -187,6 +371,12 @@ export class DeepVoidDriftScene implements ISpatialScene {
   private galaxyMesh: THREE.Mesh | null = null;
   private binaryPairGroup: THREE.Group | null = null;
   private redGiantMesh: THREE.Mesh | null = null;
+  private redGiantCoronaMesh: THREE.Mesh | null = null;
+  private redGiantMat: THREE.ShaderMaterial | null = null;
+  private starMatA: THREE.ShaderMaterial | null = null;
+  private starMatB: THREE.ShaderMaterial | null = null;
+  private flareA: THREE.Mesh | null = null;
+  private flareB: THREE.Mesh | null = null;
 
   private cameraZ = 0;
   private smoothPointer = new THREE.Vector2();
@@ -296,25 +486,90 @@ export class DeepVoidDriftScene implements ISpatialScene {
     this.galaxyMesh.rotation.x = -0.3;
     this.scene.add(this.galaxyMesh);
 
-    // 4. Rare Landmark B: Orbiting Distant Binary Star Pair
+    // 4. Rare Landmark B: Orbiting Distant Binary Star Pair with Optical Diffraction Spikes
     this.binaryPairGroup = new THREE.Group();
     this.binaryPairGroup.position.set(74, -22, -180);
 
-    const bStarGeo = new THREE.SphereGeometry(0.35, 12, 12);
-    const bMatA = new THREE.MeshBasicMaterial({ color: 0xfef08a }); // Gold
-    const bMatB = new THREE.MeshBasicMaterial({ color: 0x38bdf8 }); // Azure
-    const starA = new THREE.Mesh(bStarGeo, bMatA);
-    const starB = new THREE.Mesh(bStarGeo, bMatB);
-    starA.position.x = 1.2;
-    starB.position.x = -1.2;
+    const bStarGeo = new THREE.SphereGeometry(0.55, 20, 20);
+    this.starMatA = new THREE.ShaderMaterial({
+      vertexShader: STELLAR_SPHERE_VERT,
+      fragmentShader: STELLAR_SPHERE_FRAG,
+      uniforms: {
+        uColor: { value: new THREE.Color(0xfef08a) }, // Gold
+        uTime: { value: 0 },
+      },
+    });
+    this.starMatB = new THREE.ShaderMaterial({
+      vertexShader: STELLAR_SPHERE_VERT,
+      fragmentShader: STELLAR_SPHERE_FRAG,
+      uniforms: {
+        uColor: { value: new THREE.Color(0x38bdf8) }, // Azure
+        uTime: { value: 0 },
+      },
+    });
+
+    const starA = new THREE.Mesh(bStarGeo, this.starMatA);
+    const starB = new THREE.Mesh(bStarGeo, this.starMatB);
+    starA.position.x = 1.6;
+    starB.position.x = -1.6;
+
+    // Optical 4-point telescope diffraction flare quads
+    const flareGeo = new THREE.PlaneGeometry(7.5, 7.5);
+    const flareMatA = new THREE.ShaderMaterial({
+      vertexShader: DIFFRACTION_SPIKE_VERT,
+      fragmentShader: DIFFRACTION_SPIKE_FRAG,
+      uniforms: {
+        uColor: { value: new THREE.Color(0xfef08a) },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const flareMatB = new THREE.ShaderMaterial({
+      vertexShader: DIFFRACTION_SPIKE_VERT,
+      fragmentShader: DIFFRACTION_SPIKE_FRAG,
+      uniforms: {
+        uColor: { value: new THREE.Color(0x38bdf8) },
+      },
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+
+    this.flareA = new THREE.Mesh(flareGeo, flareMatA);
+    this.flareB = new THREE.Mesh(flareGeo, flareMatB);
+    starA.add(this.flareA);
+    starB.add(this.flareB);
+
     this.binaryPairGroup.add(starA, starB);
     this.scene.add(this.binaryPairGroup);
 
-    // 5. Rare Landmark C: Warm Red Giant in Periphery
-    const redGiantGeo = new THREE.SphereGeometry(1.6, 16, 16);
-    const redGiantMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
-    this.redGiantMesh = new THREE.Mesh(redGiantGeo, redGiantMat);
+    // 5. Rare Landmark C: Warm Red Giant with Convective Photospheric Granulation & Coronal Atmosphere
+    const redGiantGeo = new THREE.SphereGeometry(2.4, 32, 32);
+    this.redGiantMat = new THREE.ShaderMaterial({
+      vertexShader: RED_GIANT_VERT,
+      fragmentShader: RED_GIANT_FRAG,
+      uniforms: {
+        uTime: { value: 0 },
+      },
+    });
+    this.redGiantMesh = new THREE.Mesh(redGiantGeo, this.redGiantMat);
     this.redGiantMesh.position.set(52, 45, -340);
+
+    const coronaGeo = new THREE.PlaneGeometry(16.0, 16.0);
+    const coronaMat = new THREE.ShaderMaterial({
+      vertexShader: CORONA_HALO_VERT,
+      fragmentShader: CORONA_HALO_FRAG,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    this.redGiantCoronaMesh = new THREE.Mesh(coronaGeo, coronaMat);
+    this.redGiantMesh.add(this.redGiantCoronaMesh);
+
     this.scene.add(this.redGiantMesh);
   }
 
@@ -350,6 +605,14 @@ export class DeepVoidDriftScene implements ISpatialScene {
       this.starMat.uniforms.uTime.value = elapsed;
       this.starMat.uniforms.uCamPos.value.copy(this.camera.position);
     }
+
+    if (this.starMatA) this.starMatA.uniforms.uTime.value = elapsed;
+    if (this.starMatB) this.starMatB.uniforms.uTime.value = elapsed;
+    if (this.redGiantMat) this.redGiantMat.uniforms.uTime.value = elapsed;
+
+    if (this.flareA) this.flareA.lookAt(this.camera.position);
+    if (this.flareB) this.flareB.lookAt(this.camera.position);
+    if (this.redGiantCoronaMesh) this.redGiantCoronaMesh.lookAt(this.camera.position);
 
     // Recycle celestial landmarks smoothly as camera passes them
     if (this.galaxyMesh) {
@@ -449,10 +712,23 @@ export class DeepVoidDriftScene implements ISpatialScene {
 
     if (this.redGiantMesh) {
       this.scene.remove(this.redGiantMesh);
-      this.redGiantMesh.geometry.dispose();
-      (this.redGiantMesh.material as THREE.Material).dispose();
+      this.redGiantMesh.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (child.material instanceof THREE.Material) {
+            child.material.dispose();
+          }
+        }
+      });
       this.redGiantMesh = null;
+      this.redGiantCoronaMesh = null;
     }
+
+    this.starMatA = null;
+    this.starMatB = null;
+    this.redGiantMat = null;
+    this.flareA = null;
+    this.flareB = null;
 
     this.scene.clear();
   }

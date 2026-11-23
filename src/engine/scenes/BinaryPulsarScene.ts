@@ -39,13 +39,16 @@ const NEUTRON_STAR_FRAG = /* glsl */ `
 
     // High-frequency magnetic turbulence ripple
     float ripple = 0.5 + 0.5 * sin(vUv.y * 36.0 + uTime * uPulseRate + sin(vUv.x * 24.0) * 2.0);
-    float pulse = 0.88 + 0.22 * sin(uTime * uPulseRate * 1.8);
+    float pulse = 0.92 + 0.12 * sin(uTime * uPulseRate * 1.8);
 
     // Preserved distinct chromatic identity per star core (prevents bloom blowout merge)
-    float coreFalloff = pow(nDotV, 1.6);
-    vec3 emissive = mix(uLimbColor, uCoreColor, coreFalloff * 0.82 + 0.18) * (1.15 + ripple * 0.32) * pulse;
-    emissive += uCoreColor * pow(nDotV, 5.5) * 0.75;
-    emissive += uLimbColor * rim * 1.25;
+    float coreFalloff = pow(nDotV, 2.2);
+    vec3 emissive = mix(uLimbColor, uCoreColor, coreFalloff * 0.75 + 0.20) * (0.85 + ripple * 0.22) * pulse;
+    emissive += uCoreColor * pow(nDotV, 5.5) * 0.45;
+    emissive += uLimbColor * rim * 0.65;
+
+    // Soft HDR shoulder compression preserves rich star hues
+    emissive = emissive / (vec3(1.0) + emissive * 0.45);
 
     gl_FragColor = vec4(emissive, 1.0);
   }
@@ -82,20 +85,21 @@ const JET_BEAM_VERT = /* glsl */ `
     vec3 radialOffset = (sideA * cos(helixAngle) + sideB * sin(helixAngle)) * coneRadius;
     vec3 worldPos = uPulsarPos + (uJetAxis * (dist * aDirection)) + radialOffset;
 
-    // Shock diamond knots along jet axis
-    float shockDiamond = 0.7 + 0.5 * sin(dist * 1.8 - uTime * 8.0);
+    // Shock diamond knots along jet axis (restrained modulation)
+    float shockDiamond = 0.5 + 0.35 * sin(dist * 1.8 - uTime * 8.0);
 
     // Color gradient: Incandescent pure blue-white -> Electric cyan -> Violet shock sheath
     float distFade = 1.0 - (dist / 65.0);
-    vec3 jetCol = mix(vec3(0.85, 0.95, 1.0), vec3(0.1, 0.85, 1.0), smoothstep(0.0, 24.0, dist));
-    jetCol = mix(jetCol, vec3(0.65, 0.2, 1.0), smoothstep(24.0, 65.0, dist));
+    vec3 jetCol = mix(vec3(0.75, 0.90, 1.0), vec3(0.12, 0.72, 0.95), smoothstep(0.0, 24.0, dist));
+    jetCol = mix(jetCol, vec3(0.55, 0.18, 0.85), smoothstep(24.0, 65.0, dist));
 
-    vColor = jetCol * (1.6 + shockDiamond * 1.4);
-    vAlpha = distFade * smoothstep(0.0, 3.5, dist) * (0.65 + aSeed * 0.35);
+    vColor = jetCol * (0.85 + shockDiamond * 0.45);
+    // Low-opacity animated plasma filaments prevent additive clipping to white
+    vAlpha = distFade * smoothstep(0.0, 3.5, dist) * (0.16 + aSeed * 0.18);
 
     vec4 mvPos = modelViewMatrix * vec4(worldPos, 1.0);
     gl_Position = projectionMatrix * mvPos;
-    gl_PointSize = clamp((32.0 + aSeed * 22.0) * uPixelRatio / max(-mvPos.z, 1.0), 1.2, 9.0);
+    gl_PointSize = clamp((16.0 + aSeed * 14.0) * uPixelRatio / max(-mvPos.z, 1.0), 1.0, 4.8);
   }
 `;
 
@@ -107,8 +111,10 @@ const JET_BEAM_FRAG = /* glsl */ `
     float d = length(gl_PointCoord - 0.5);
     if (d > 0.5) discard;
     float core = exp(-d * d * 28.0);
-    float halo = 0.28 * exp(-d * d * 8.0);
-    gl_FragColor = vec4(vColor * (1.0 + core * 0.8), (core + halo) * vAlpha);
+    float halo = 0.22 * exp(-d * d * 8.0);
+    // Soft HDR compression preserves rich jet hues
+    vec3 col = vColor / (vec3(1.0) + vColor * 0.65);
+    gl_FragColor = vec4(col * (0.85 + core * 0.4), (core + halo) * vAlpha * 0.75);
   }
 `;
 
@@ -135,25 +141,25 @@ const ACCRETION_BRIDGE_VERT = /* glsl */ `
       // Swirling circumbinary accretion disk encircling both stars
       float radius = 5.2 + aHeight * 3.2;
       worldPos = vec3(cos(angle) * radius, (aSeed - 0.5) * 0.8, sin(angle) * radius);
-      vColor = mix(vec3(0.3, 0.75, 1.0), vec3(1.0, 0.55, 0.15), aSeed);
-      vAlpha = 0.55 * smoothstep(8.5, 5.0, radius);
+      vColor = mix(vec3(0.25, 0.65, 0.95), vec3(0.85, 0.48, 0.12), aSeed);
+      vAlpha = 0.20 * smoothstep(8.5, 5.0, radius);
     } else {
-      // Roche-lobe overflow plasma stream transferring mass from companion star B to Pulsar A
+      // Subtle tidal mass transfer stream flowing between companion star B and pulsar A
       float t = fract(aOrbitAngle + uTime * aSpeed * 0.45);
       vec3 p0 = uStarB;
-      vec3 p1 = (uStarA + uStarB) * 0.5 + vec3(0.0, 1.2, 0.0);
+      vec3 p1 = (uStarA + uStarB) * 0.5 + vec3(0.0, 1.1, 0.0);
       vec3 p2 = uStarA;
       // Quadratic bezier mass transfer arc
       worldPos = mix(mix(p0, p1, t), mix(p1, p2, t), t);
-      worldPos += vec3((aSeed - 0.5) * 0.4, (aHeight - 0.5) * 0.4, (aSeed - 0.5) * 0.4);
+      worldPos += vec3((aSeed - 0.5) * 0.35, (aHeight - 0.5) * 0.35, (aSeed - 0.5) * 0.35);
 
-      vColor = mix(vec3(1.0, 0.4, 0.1), vec3(0.3, 0.85, 1.0), t);
-      vAlpha = 0.75;
+      vColor = mix(vec3(0.92, 0.42, 0.10), vec3(0.24, 0.75, 0.95), t);
+      vAlpha = 0.30;
     }
 
     vec4 mvPos = modelViewMatrix * vec4(worldPos, 1.0);
     gl_Position = projectionMatrix * mvPos;
-    gl_PointSize = clamp((18.0 + aSeed * 18.0) * uPixelRatio / max(-mvPos.z, 1.0), 1.0, 6.0);
+    gl_PointSize = clamp((12.0 + aSeed * 10.0) * uPixelRatio / max(-mvPos.z, 1.0), 1.0, 3.6);
   }
 `;
 
@@ -165,8 +171,10 @@ const ACCRETION_BRIDGE_FRAG = /* glsl */ `
     float d = length(gl_PointCoord - 0.5);
     if (d > 0.5) discard;
     float core = exp(-d * d * 24.0);
-    float halo = 0.3 * exp(-d * d * 8.0);
-    gl_FragColor = vec4(vColor * (1.0 + core * 0.5), (core + halo) * vAlpha);
+    float halo = 0.25 * exp(-d * d * 8.0);
+    // Soft HDR shoulder compression prevents blowout
+    vec3 col = vColor / (vec3(1.0) + vColor * 0.65);
+    gl_FragColor = vec4(col * (0.85 + core * 0.35), (core + halo) * vAlpha * 0.75);
   }
 `;
 
@@ -175,11 +183,11 @@ export class BinaryPulsarScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.92,
-    radius: 0.54,
-    threshold: 0.52,
+    strength: 0.32,
+    radius: 0.48,
+    threshold: 0.90,
   };
-  public readonly exposure = 1.05;
+  public readonly exposure = 0.78;
 
   // Star A (Primary Magnetar / Pulsar)
   private starAMesh: THREE.Mesh | null = null;
@@ -242,30 +250,30 @@ export class BinaryPulsarScene implements ISpatialScene {
     this.starfieldPoints = new THREE.Points(this.starfieldGeo, this.starfieldMat);
     this.scene.add(this.starfieldPoints);
 
-    // 2. Primary Pulsar Core A (Electric Cyan / Ultra-dense)
-    this.starAGeo = new THREE.SphereGeometry(0.85, 32, 32);
+    // 2. Primary Pulsar Core A (Compact Icy-Blue Neutron Star)
+    this.starAGeo = new THREE.SphereGeometry(0.78, 32, 32);
     this.starAMat = new THREE.ShaderMaterial({
       vertexShader: NEUTRON_STAR_VERT,
       fragmentShader: NEUTRON_STAR_FRAG,
       uniforms: {
         uTime: { value: 0 },
-        uCoreColor: { value: new THREE.Color(0xa5f3fc) },
-        uLimbColor: { value: new THREE.Color(0x0284c7) },
+        uCoreColor: { value: new THREE.Color(0x90e0fc) },
+        uLimbColor: { value: new THREE.Color(0x026090) },
         uPulseRate: { value: 18.0 },
       },
     });
     this.starAMesh = new THREE.Mesh(this.starAGeo, this.starAMat);
     this.scene.add(this.starAMesh);
 
-    // 3. Companion Neutron Star Core B (Molten Gold / Amber)
-    this.starBGeo = new THREE.SphereGeometry(0.68, 32, 32);
+    // 3. Companion Star Core B (Dimmer Warm-Amber Companion)
+    this.starBGeo = new THREE.SphereGeometry(0.62, 32, 32);
     this.starBMat = new THREE.ShaderMaterial({
       vertexShader: NEUTRON_STAR_VERT,
       fragmentShader: NEUTRON_STAR_FRAG,
       uniforms: {
         uTime: { value: 0 },
-        uCoreColor: { value: new THREE.Color(0xfef08a) },
-        uLimbColor: { value: new THREE.Color(0xea580c) },
+        uCoreColor: { value: new THREE.Color(0xd98424) },
+        uLimbColor: { value: new THREE.Color(0x8a320c) },
         uPulseRate: { value: 12.0 },
       },
     });

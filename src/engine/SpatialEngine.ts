@@ -84,7 +84,7 @@ export class SpatialEngine {
     this.renderer.setPixelRatio(this.currentDpr);
     this.renderer.setSize(this.width, this.height, false);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 0.80;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     // 2. Reusable EffectComposer Pipeline
@@ -102,9 +102,9 @@ export class SpatialEngine {
     // Pass 2: Localized UnrealBloomPass
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(this.width, this.height),
-      1.1,
-      0.65,
-      0.32
+      0.32,
+      0.48,
+      0.88
     );
     this.composer.addPass(this.bloomPass);
 

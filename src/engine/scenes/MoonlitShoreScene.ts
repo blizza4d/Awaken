@@ -162,7 +162,7 @@ const GERSTNER_OCEAN_FRAG = /* glsl */ `
     float NdotH = max(0.0, dot(N, H));
     float specSharp = pow(NdotH, 180.0) * 2.2;
     float specBroad = pow(NdotH, 24.0) * 0.35;
-    vec3 moonSpecular = uMoonColor * (specSharp + specBroad);
+    vec3 moonSpecular = uMoonColor * (specSharp + specBroad) * 0.95;
 
     // 5. Procedural Breaking Waves & Shoreline Foam
     vec2 foamCoord = vWorldPos.xz * 1.8 + vec2(uTime * 0.25, -uTime * 0.15);

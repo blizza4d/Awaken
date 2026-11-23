@@ -148,13 +148,16 @@ const AURORA_FRAGMENT_SHADER = /* glsl */ `
       vec3 layerCol = mix(emerald, teal, smoothstep(0.05, 0.48, h));
       layerCol = mix(layerCol, violet, smoothstep(0.48, 0.92, h));
 
-      float alpha = density * vertFalloff * 0.35;
-      col.rgb += layerCol * alpha * (1.0 - col.a) * 4.5;
+      float alpha = density * vertFalloff * 0.28;
+      vec3 layerEmissive = layerCol * alpha * (1.0 - col.a) * 2.4;
+      col.rgb += layerEmissive / (1.0 + layerEmissive * 0.45);
       col.a += alpha * (1.0 - col.a);
 
       if (col.a >= 0.94) break;
     }
 
+    // Soft HDR shoulder compression to prevent saturation bloom spikes
+    col.rgb = col.rgb / (1.0 + col.rgb * 0.45);
     return col;
   }
 
@@ -227,13 +230,13 @@ const AURORA_FRAGMENT_SHADER = /* glsl */ `
     if (isSky) {
       finalColor = skyAndAurora;
     } else {
-      // Dark deep glacial lake water color with aurora specular reflection
-      vec3 waterDeep = vec3(0.004, 0.014, 0.026);
-      vec3 waterSurface = mix(waterDeep, skyAndAurora * 0.92, waterReflectance);
+      // Dark deep glacial lake water color with calibrated restrained aurora specular reflection
+      vec3 waterDeep = vec3(0.003, 0.010, 0.020);
+      vec3 waterSurface = mix(waterDeep, skyAndAurora * 0.52, waterReflectance);
 
       // Soft shoreline mist layer near horizon
       float shoreMist = smoothstep(0.08, 0.0, abs(rd.y)) * 0.35;
-      vec3 mistCol = mix(vec3(0.03, 0.07, 0.11), aurora.rgb * 0.25, 0.45);
+      vec3 mistCol = mix(vec3(0.025, 0.055, 0.085), aurora.rgb * 0.18, 0.45);
       finalColor = mix(waterSurface, mistCol, shoreMist);
     }
 
@@ -253,11 +256,11 @@ export class ArcticAuroraScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.95,
-    radius: 0.62,
-    threshold: 0.45,
+    strength: 0.30,
+    radius: 0.48,
+    threshold: 0.88,
   };
-  public readonly exposure = 1.05;
+  public readonly exposure = 0.78;
 
   private quadMesh: THREE.Mesh | null = null;
   private quadGeo: THREE.PlaneGeometry | null = null;

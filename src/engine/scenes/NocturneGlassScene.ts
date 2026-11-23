@@ -105,8 +105,9 @@ const NOCTURNE_FRAGMENT_SHADER = /* glsl */ `
                 bColor = vec3(1.0, 0.94, 0.82); // Soft Tungsten
               }
 
-              float intensity = (0.55 + rnd * 0.85) * (1.2 - layer * 0.25);
-              col += bColor * disk * intensity;
+              float intensity = (0.35 + rnd * 0.45) * (1.1 - layer * 0.22);
+              vec3 bokehContribution = bColor * disk * intensity;
+              col += bokehContribution / (1.0 + bokehContribution * 0.35);
             }
           }
         }
@@ -225,23 +226,26 @@ const NOCTURNE_FRAGMENT_SHADER = /* glsl */ `
     // 2. Sharper refracted city bokeh inside the water droplets
     vec3 refractedInside = renderBokehBackdrop(refractedUV, 0.15);
 
-    // Composite frosted glass with crystal-clear droplet lenses
-    vec3 finalColor = mix(backgroundBlurred * (0.85 - mist * 0.6), refractedInside * 1.35, dropMask);
+    // Composite frosted glass with crystal-clear droplet lenses (restrained contrast)
+    vec3 finalColor = mix(backgroundBlurred * (0.80 - mist * 0.5), refractedInside * 1.05, dropMask);
 
-    // Specular Rim Glint on the upper-left crest of each raindrop from overhead streetlights
+    // Specular Rim Glint on the upper-left crest of each raindrop from overhead streetlights (subtle, non-glaring)
     if (dropMask > 0.05) {
       vec3 lightDir = normalize(vec3(-0.45, 0.82, 0.35));
       vec3 norm3D = normalize(vec3(dropNormal, sqrt(max(0.01, 1.0 - dot(dropNormal, dropNormal)))));
       float spec = pow(max(0.0, dot(norm3D, lightDir)), 32.0);
-      vec3 rimGlint = vec3(1.0, 0.95, 0.88) * spec * 2.2 * dropMask;
+      vec3 rimGlint = vec3(0.95, 0.90, 0.82) * spec * 0.85 * dropMask;
       finalColor += rimGlint;
     }
 
     // Ultra-rare, soft distant warm lightning illumination across the foggy glass (gentle pulse every ~35s)
     float lightningCycle = fract(uTime * 0.028);
     float lightningFlash = exp(-abs(lightningCycle - 0.5) * 45.0) * step(0.48, lightningCycle) * step(lightningCycle, 0.52);
-    vec3 lightningColor = vec3(0.18, 0.16, 0.22) * lightningFlash * 0.8;
+    vec3 lightningColor = vec3(0.12, 0.11, 0.15) * lightningFlash * 0.5;
     finalColor += lightningColor;
+
+    // Soft HDR shoulder compression to prevent hot spots
+    finalColor = finalColor / (1.0 + finalColor * 0.35);
 
     // Cinematic 35mm Vignette (darkened window frame edges)
     vec2 q = vUv - 0.5;
@@ -260,11 +264,11 @@ export class NocturneGlassScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.88,
-    radius: 0.58,
-    threshold: 0.52,
+    strength: 0.26,
+    radius: 0.45,
+    threshold: 0.88,
   };
-  public readonly exposure = 1.04;
+  public readonly exposure = 0.80;
 
   private quadMesh: THREE.Mesh | null = null;
   private quadGeo: THREE.PlaneGeometry | null = null;

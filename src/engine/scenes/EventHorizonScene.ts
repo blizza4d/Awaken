@@ -153,54 +153,60 @@ const RAYMARCH_FRAGMENT_SHADER = /* glsl */ `
       vec3 nextDir = normalize(dir + accel * dt);
       vec3 nextPos = pos + nextDir * dt;
 
-      // Photon sphere delicate incandescent halo (r ~ 1.5 * RS)
+      // Razor-thin inner photon ring (r ~ 1.5 * RS) - controlled pale-gold/warm-white halo, never blown out
       float photonDist = abs(r - RS * 1.48);
-      float photonRing = exp(-photonDist * 8.5) * 0.042 * dt;
-      accumGlow += vec3(0.85, 0.92, 1.0) * photonRing * transmittance;
+      float photonRing = exp(-photonDist * 16.0) * 0.024 * dt;
+      accumGlow += vec3(0.96, 0.90, 0.78) * photonRing * transmittance;
 
       // Volumetric Accretion Disk slab intersection / proximity sampling
-      float diskHeight = 0.24 + (r - DISK_INNER) * 0.045;
-      if (abs(pos.y) < diskHeight * 2.4 && r > DISK_INNER * 0.85 && r < DISK_OUTER) {
-        float verticalDensity = exp(-(pos.y * pos.y) / max(diskHeight * diskHeight * 0.32, 0.002));
-        float radialIn = smoothstep(DISK_INNER, DISK_INNER + 0.85, r);
-        float radialOut = smoothstep(DISK_OUTER, DISK_INNER + 1.8, r);
+      float diskHeight = 0.22 + (r - DISK_INNER) * 0.04;
+      if (abs(pos.y) < diskHeight * 2.2 && r > DISK_INNER * 0.88 && r < DISK_OUTER) {
+        float verticalDensity = exp(-(pos.y * pos.y) / max(diskHeight * diskHeight * 0.28, 0.002));
+        float radialIn = smoothstep(DISK_INNER, DISK_INNER + 0.75, r);
+        float radialOut = smoothstep(DISK_OUTER, DISK_INNER + 1.6, r);
         float radialMask = radialIn * radialOut;
 
         if (radialMask * verticalDensity > 0.002) {
-          // Differential Keplerian swirling plasma coordinates
+          // Differential Keplerian swirling plasma coordinates with fine filament structures
           float angle = atan(pos.z, pos.x);
-          float keplerOmega = 2.6 / pow(max(r, 1.0), 1.35);
+          float keplerOmega = 2.4 / pow(max(r, 1.0), 1.35);
           float spiralAngle = angle + uTime * keplerOmega + 4.8 / max(r, 1.0);
 
           vec3 sampleCoord = vec3(
-            cos(spiralAngle) * r * 0.65,
-            pos.y * 2.5,
-            sin(spiralAngle) * r * 0.65
+            cos(spiralAngle) * r * 0.85,
+            pos.y * 3.2,
+            sin(spiralAngle) * r * 0.85
           );
 
-          float plasma = fbm(sampleCoord * 1.15 - vec3(0.0, 0.0, uTime * 0.25));
-          float filaments = smoothstep(0.24, 0.86, plasma);
+          float plasma1 = fbm(sampleCoord * 1.35 - vec3(0.0, 0.0, uTime * 0.16));
+          float plasma2 = noise3D(sampleCoord * 3.6 + vec3(uTime * 0.22, 0.0, 0.0));
+          float filaments = smoothstep(0.24, 0.88, plasma1 * 0.72 + plasma2 * 0.28);
 
-          // Relativistic Doppler Beaming: approaching side is hotter/bluer & brighter
+          // Relativistic Doppler Beaming: approaching side is hotter/bluer & brighter; receding side is rich deep copper/crimson
           vec3 tangent = normalize(vec3(-pos.z, 0.0, pos.x));
           float doppler = dot(tangent, -rayDir); // >0 approaching camera, <0 receding
-          float beaming = pow(clamp(1.0 + doppler * 0.55, 0.38, 1.95), 2.1);
+          float beaming = clamp(0.72 + doppler * 0.48, 0.35, 1.35);
 
-          // Heated plasma temperature palette: deep crimson -> blazing orange -> gold -> relativistic cyan-blue
-          float heat = clamp((1.0 - (r - DISK_INNER) / (DISK_OUTER - DISK_INNER)) * 1.15 + doppler * 0.35 + filaments * 0.25, 0.0, 1.0);
+          // Heated plasma temperature palette: deep crimson -> burnt copper -> molten amber -> warm gold on inner photon ring
+          float heat = clamp((1.0 - (r - DISK_INNER) / (DISK_OUTER - DISK_INNER)) * 1.1 + doppler * 0.32 + filaments * 0.24, 0.0, 1.0);
 
-          vec3 coolCrimson = vec3(0.68, 0.12, 0.02);
-          vec3 blazingOrange = vec3(1.0, 0.42, 0.04);
-          vec3 hotGold = vec3(1.0, 0.84, 0.48);
-          vec3 relativisticBlue = vec3(0.45, 0.82, 1.0);
+          vec3 deepCrimson = vec3(0.48, 0.07, 0.02);
+          vec3 burntCopper = vec3(0.78, 0.28, 0.05);
+          vec3 moltenAmber = vec3(0.96, 0.55, 0.12);
+          vec3 paleGold = vec3(1.0, 0.88, 0.58);
+          vec3 innerPhotonWhite = vec3(0.95, 0.94, 0.88);
 
-          vec3 diskColor = mix(coolCrimson, blazingOrange, smoothstep(0.0, 0.42, heat));
-          diskColor = mix(diskColor, hotGold, smoothstep(0.42, 0.76, heat));
-          diskColor = mix(diskColor, relativisticBlue, smoothstep(0.74, 1.0, heat) * (0.45 + max(doppler, 0.0) * 0.65));
+          vec3 diskColor = mix(deepCrimson, burntCopper, smoothstep(0.0, 0.38, heat));
+          diskColor = mix(diskColor, moltenAmber, smoothstep(0.38, 0.72, heat));
+          diskColor = mix(diskColor, paleGold, smoothstep(0.72, 0.92, heat));
+          // Pale-gold/warm-white strictly on the razor-thin inner boundary approaching camera
+          diskColor = mix(diskColor, innerPhotonWhite, smoothstep(0.92, 1.0, heat) * max(doppler, 0.0) * smoothstep(DISK_INNER + 0.6, DISK_INNER, r));
 
-          float density = verticalDensity * radialMask * (0.35 + filaments * 1.35) * dt * 1.32;
-          accumGlow += diskColor * density * beaming * transmittance * 1.55;
-          transmittance *= exp(-density * 0.72);
+          float density = verticalDensity * radialMask * (0.32 + filaments * 1.15) * dt * 0.95;
+          vec3 stepGlow = diskColor * density * beaming * transmittance * 1.12;
+          // Soft shoulder compression per-step prevents white-out summing
+          accumGlow += stepGlow / (vec3(1.0) + stepGlow * 0.35);
+          transmittance *= exp(-density * 0.65);
         }
       }
 
@@ -275,11 +281,11 @@ const PARTICLE_DISK_VERT = /* glsl */ `
     float behindHole = step(camDist, length(worldPos - cameraPosition));
     float shadowMask = 1.0 - behindHole * smoothstep(2.55, 2.05, perpDist);
 
-    vAlpha = (0.28 + 0.45 * aSeed) * smoothstep(10.8, 7.2, aRadius) * smoothstep(2.3, 2.9, aRadius) * shadowMask;
+    vAlpha = (0.12 + 0.22 * aSeed) * smoothstep(10.8, 7.2, aRadius) * smoothstep(2.3, 2.9, aRadius) * shadowMask;
 
     vec4 mvPos = modelViewMatrix * vec4(worldPos, 1.0);
     gl_Position = projectionMatrix * mvPos;
-    gl_PointSize = clamp((16.0 + aSeed * 18.0) * uPixelRatio / max(-mvPos.z, 1.0), 1.0, 5.5);
+    gl_PointSize = clamp((11.0 + aSeed * 12.0) * uPixelRatio / max(-mvPos.z, 1.0), 1.0, 3.6);
   }
 `;
 
@@ -291,8 +297,10 @@ const PARTICLE_DISK_FRAG = /* glsl */ `
     float d = length(gl_PointCoord - 0.5);
     if (d > 0.5) discard;
     float core = exp(-d * d * 28.0);
-    float halo = 0.28 * exp(-d * d * 8.0);
-    gl_FragColor = vec4(vColor * (1.0 + core * 0.5), (core + halo) * vAlpha);
+    float halo = 0.25 * exp(-d * d * 8.0);
+    // Soft HDR shoulder compression preserves rich color saturation instead of clipping to white
+    vec3 col = vColor / (vec3(1.0) + vColor * 0.65);
+    gl_FragColor = vec4(col * (1.0 + core * 0.4), (core + halo) * vAlpha * 0.75);
   }
 `;
 
@@ -301,11 +309,11 @@ export class EventHorizonScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.82,
-    radius: 0.56,
-    threshold: 0.62,
+    strength: 0.35,
+    radius: 0.48,
+    threshold: 0.90,
   };
-  public readonly exposure = 0.96;
+  public readonly exposure = 0.75;
 
   private raymarchQuad: THREE.Mesh | null = null;
   private raymarchGeo: THREE.PlaneGeometry | null = null;

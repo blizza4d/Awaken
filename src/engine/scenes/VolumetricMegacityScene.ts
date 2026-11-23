@@ -59,7 +59,8 @@ const RAIN_VERTEX_SHADER = /* glsl */ `
     vec3 finalPos = worldPos + velDir * (position.y * streakLen) + vec3(position.x * 0.045, 0.0, 0.0);
 
     float dist = length(rel);
-    vAlpha = smoothstep(75.0, 12.0, dist) * (0.28 + 0.35 * sin(aPhase * 6.28318 + uTime * 4.0) * 0.5 + 0.25);
+    // Faint depth-faded rain streaks (~18% opacity)
+    vAlpha = smoothstep(70.0, 10.0, dist) * 0.18 * (0.7 + 0.3 * sin(aPhase * 6.28318 + uTime * 3.0));
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPos, 1.0);
   }
@@ -71,12 +72,12 @@ const RAIN_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
 
   void main() {
-    // Soft anti-aliased elliptical profile along streak to eliminate square edges
+    // Soft anti-aliased profile along streak to eliminate square edges
     float x = abs(vUv.x - 0.5) * 2.0;
     float y = abs(vUv.y - 0.5) * 2.0;
     float profile = clamp((1.0 - x * x) * (1.0 - y * y * y * y), 0.0, 1.0);
     if (profile <= 0.01) discard;
-    gl_FragColor = vec4(uRainTint, vAlpha * profile);
+    gl_FragColor = vec4(uRainTint * 0.72, vAlpha * profile);
   }
 `;
 
@@ -181,8 +182,9 @@ const VOLUMETRIC_HAZE_FRAG = /* glsl */ `
     vec2 p = vUv * 2.0 - 1.0;
     float radial = exp(-dot(p, p) * 2.4);
     float shimmer = 0.82 + 0.18 * sin(uTime * 0.7 + uSeed * 6.2831 + vUv.y * 4.0);
-    float alpha = radial * 0.16 * shimmer;
-    gl_FragColor = vec4(uColor, alpha);
+    // Subtle low-luminance atmospheric haze without washing out the canyon
+    float alpha = radial * 0.045 * shimmer;
+    gl_FragColor = vec4(uColor * 0.65, alpha);
   }
 `;
 
@@ -193,45 +195,45 @@ function createProceduralBuildingTextures(): {
 } {
   const size = 512;
 
-  // 1. Albedo Architectural Panel Map
+  // 1. Albedo Brutalist Wet-Concrete & Smoked-Glass Panel Map (#04070e base)
   const albedoCanvas = document.createElement('canvas');
   albedoCanvas.width = size;
   albedoCanvas.height = size;
   const aCtx = albedoCanvas.getContext('2d')!;
-  aCtx.fillStyle = '#0c101b';
+  aCtx.fillStyle = '#04070e';
   aCtx.fillRect(0, 0, size, size);
 
-  // Architectural steel & glass facade mullions
-  for (let y = 0; y < size; y += 16) {
-    aCtx.fillStyle = y % 64 === 0 ? '#182032' : '#101624';
+  // Architectural steel & smoked-glass facade mullions
+  for (let y = 0; y < size; y += 12) {
+    aCtx.fillStyle = y % 48 === 0 ? '#0b1424' : '#070c17';
     aCtx.fillRect(0, y, size, 2);
   }
-  for (let x = 0; x < size; x += 24) {
-    aCtx.fillStyle = '#151c2c';
+  for (let x = 0; x < size; x += 16) {
+    aCtx.fillStyle = '#080e1c';
     aCtx.fillRect(x, 0, 2, size);
   }
 
-  // 2. Rain Wetness Roughness / Specular Map (dark = mirror wet, bright = rough concrete)
+  // 2. Rain Wetness Roughness Map (capped so surfaces retain texture rather than mirror glare)
   const roughCanvas = document.createElement('canvas');
   roughCanvas.width = size;
   roughCanvas.height = size;
   const rCtx = roughCanvas.getContext('2d')!;
-  rCtx.fillStyle = '#686868';
+  rCtx.fillStyle = '#555555'; // Roughness floor >= 0.33
   rCtx.fillRect(0, 0, size, size);
 
-  // Vertical rain-drenched specular sheets (low roughness = glossy neon reflections)
-  for (let i = 0; i < 160; i++) {
+  // Vertical rain runoff channels with controlled gloss
+  for (let i = 0; i < 90; i++) {
     const rx = Math.random() * size;
-    const rw = 2 + Math.random() * 14;
+    const rw = 2 + Math.random() * 8;
     const grad = rCtx.createLinearGradient(rx, 0, rx, size);
-    grad.addColorStop(0, 'rgba(18, 18, 18, 0.85)');
-    grad.addColorStop(0.5, 'rgba(32, 32, 32, 0.7)');
-    grad.addColorStop(1, 'rgba(12, 12, 12, 0.92)');
+    grad.addColorStop(0, 'rgba(42, 42, 42, 0.7)');
+    grad.addColorStop(0.5, 'rgba(56, 56, 56, 0.55)');
+    grad.addColorStop(1, 'rgba(38, 38, 38, 0.75)');
     rCtx.fillStyle = grad;
     rCtx.fillRect(rx, 0, rw, size);
   }
 
-  // 3. Randomized Emissive Window Lights Map
+  // 3. Recessed High-Frequency Micro-Window Grid (75%–85% dark, lit: warm tungsten #d99b52, muted slate-cyan #5ca8c9)
   const emCanvas = document.createElement('canvas');
   emCanvas.width = size;
   emCanvas.height = size;
@@ -239,37 +241,37 @@ function createProceduralBuildingTextures(): {
   eCtx.fillStyle = '#000000';
   eCtx.fillRect(0, 0, size, size);
 
-  const palette = [
-    '#00f0ff', // Cyberpunk Cyan
-    '#38bdf8', // Cool Sky
-    '#ff2a85', // Neon Magenta
-    '#ff9f1c', // Warm Amber Apartment
-    '#fde68a', // Soft Tungsten Office
-    '#a855f7', // Violet Lab
+  const windowPalette = [
+    '#d99b52', // Restrained warm tungsten
+    '#5ca8c9', // Muted slate-cyan
+    '#c88448', // Warm amber apartment
+    '#4a90a4', // Deep cyan office
   ];
 
-  const rows = 32;
-  const cols = 16;
+  const rows = 48;
+  const cols = 24;
   const cellW = size / cols;
   const cellH = size / rows;
 
   for (let r = 0; r < rows; r++) {
-    // Occasional continuous neon floor strip
-    const isNeonFloor = r % 9 === 0 && Math.random() > 0.35;
-    const floorColor = Math.random() > 0.45 ? '#00f0ff' : '#ff2a85';
+    // Sparse thin architectural neon accent line on select floors
+    const isAccentLine = r % 16 === 0 && Math.random() > 0.65;
+    const accentCol = Math.random() > 0.5 ? '#38bdf8' : '#d99b52';
 
     for (let c = 0; c < cols; c++) {
-      if (isNeonFloor) {
-        eCtx.fillStyle = floorColor;
-        eCtx.fillRect(c * cellW + 2, r * cellH + 5, cellW - 4, cellH - 10);
+      if (isAccentLine) {
+        eCtx.fillStyle = accentCol;
+        eCtx.globalAlpha = 0.55;
+        eCtx.fillRect(c * cellW + 1, r * cellH + cellH * 0.5, cellW - 2, 1);
         continue;
       }
 
-      if (Math.random() < 0.34) {
-        const col = palette[Math.floor(Math.random() * palette.length)];
+      // 78% to 84% dark rooms
+      if (Math.random() < 0.18) {
+        const col = windowPalette[Math.floor(Math.random() * windowPalette.length)];
         eCtx.fillStyle = col;
-        eCtx.globalAlpha = 0.45 + Math.random() * 0.55;
-        eCtx.fillRect(c * cellW + 4, r * cellH + 4, cellW - 8, cellH - 8);
+        eCtx.globalAlpha = 0.35 + Math.random() * 0.45;
+        eCtx.fillRect(c * cellW + 3, r * cellH + 3, cellW - 6, cellH - 6);
       }
     }
   }
@@ -298,11 +300,11 @@ export class VolumetricMegacityScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.76,
-    radius: 0.52,
-    threshold: 0.58,
+    strength: 0.32,
+    radius: 0.48,
+    threshold: 0.88,
   };
-  public readonly exposure = 1.04;
+  public readonly exposure = 0.80;
 
   private buildingsMesh: THREE.InstancedMesh | null = null;
   private spiresMesh: THREE.InstancedMesh | null = null;
@@ -333,38 +335,38 @@ export class VolumetricMegacityScene implements ISpatialScene {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x050814);
-    // Volumetric exponential fog tuned to absorb neon light hues
-    this.scene.fog = new THREE.FogExp2(0x060b1a, 0.0082);
+    this.scene.background = new THREE.Color(0x02040a);
+    // Volumetric exponential fog tuned to absorb neon light hues into deep midnight indigo
+    this.scene.fog = new THREE.FogExp2(0x030610, 0.0092);
 
     this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 420);
     this.camera.position.set(0, 42, 0);
   }
 
   public init(_renderer: THREE.WebGLRenderer): void {
-    // 1. Lighting & Neon Atmospheric Beacons
-    const hemi = new THREE.HemisphereLight(0x38bdf8, 0x1e092d, 0.65);
+    // 1. Restrained Lighting & Neon Atmospheric Beacons
+    const hemi = new THREE.HemisphereLight(0x182848, 0x060812, 0.32);
     this.scene.add(hemi);
 
-    const dirLight = new THREE.DirectionalLight(0x7dd3fc, 0.95);
+    const dirLight = new THREE.DirectionalLight(0x386088, 0.42);
     dirLight.position.set(60, 120, 40);
     this.scene.add(dirLight);
 
-    const cyanBeacon = new THREE.PointLight(0x00f0ff, 220, 140, 1.5);
-    const magentaBeacon = new THREE.PointLight(0xff2a85, 210, 140, 1.5);
-    const amberBeacon = new THREE.PointLight(0xff9f1c, 160, 120, 1.5);
+    const cyanBeacon = new THREE.PointLight(0x00d8ea, 45, 110, 1.8);
+    const magentaBeacon = new THREE.PointLight(0xcc2268, 38, 110, 1.8);
+    const amberBeacon = new THREE.PointLight(0xd98825, 42, 100, 1.8);
     this.droneLights.push(cyanBeacon, magentaBeacon, amberBeacon);
     this.scene.add(cyanBeacon, magentaBeacon, amberBeacon);
 
-    // 2. Rain-Slick Street Surface
+    // 2. Rain-Slick Street Surface (Dark PBR with subtle muted glints)
     const { albedoMap, roughnessMap, emissiveMap } = createProceduralBuildingTextures();
     this.disposableTextures.push(albedoMap, roughnessMap, emissiveMap);
 
     const groundGeo = new THREE.PlaneGeometry(520, 520);
     const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x05070e,
-      roughness: 0.14,
-      metalness: 0.78,
+      color: 0x03050b,
+      roughness: 0.32,
+      metalness: 0.42,
     });
     this.disposableGeometries.push(groundGeo);
     this.disposableMaterials.push(groundMat);
@@ -382,11 +384,11 @@ export class VolumetricMegacityScene implements ISpatialScene {
     const buildingMat = new THREE.MeshStandardMaterial({
       map: albedoMap,
       roughnessMap: roughnessMap,
-      roughness: 0.32,
-      metalness: 0.72,
+      roughness: 0.42,
+      metalness: 0.45,
       emissive: new THREE.Color(0xffffff),
       emissiveMap: emissiveMap,
-      emissiveIntensity: 1.55,
+      emissiveIntensity: 0.85,
     });
     this.disposableMaterials.push(buildingMat);
 
@@ -496,17 +498,17 @@ export class VolumetricMegacityScene implements ISpatialScene {
     const signGeo = new THREE.BoxGeometry(1, 1, 0.35);
     const signMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
-      toneMapped: false,
+      toneMapped: true,
     });
     this.disposableGeometries.push(signGeo);
     this.disposableMaterials.push(signMat);
 
     this.neonSignsMesh = new THREE.InstancedMesh(signGeo, signMat, NEON_SIGN_COUNT);
     const neonColors = [
-      new THREE.Color(0x00f0ff).multiplyScalar(2.4),
-      new THREE.Color(0xff2a85).multiplyScalar(2.4),
-      new THREE.Color(0xa855f7).multiplyScalar(2.2),
-      new THREE.Color(0xff9f1c).multiplyScalar(2.2),
+      new THREE.Color(0x00c4d8).multiplyScalar(1.05),
+      new THREE.Color(0xd92672).multiplyScalar(1.05),
+      new THREE.Color(0x8a45cf).multiplyScalar(0.95),
+      new THREE.Color(0xd98218).multiplyScalar(0.95),
     ];
 
     for (let i = 0; i < NEON_SIGN_COUNT; i++) {
@@ -519,8 +521,8 @@ export class VolumetricMegacityScene implements ISpatialScene {
       this.dummy.position.set(sx, sy, b.z);
       this.dummy.rotation.set(0, Math.PI / 2, 0);
       this.dummy.scale.set(
-        verticalBanner ? 1.8 : b.depth * 0.72,
-        verticalBanner ? 14 + Math.random() * 18 : 2.2 + Math.random() * 2.5,
+        verticalBanner ? 1.6 : b.depth * 0.65,
+        verticalBanner ? 12 + Math.random() * 16 : 2.0 + Math.random() * 2.2,
         1
       );
       this.dummy.updateMatrix();
@@ -531,15 +533,15 @@ export class VolumetricMegacityScene implements ISpatialScene {
     if (this.neonSignsMesh.instanceColor) this.neonSignsMesh.instanceColor.needsUpdate = true;
     this.scene.add(this.neonSignsMesh);
 
-    // 5. Instanced Aerial Drone Spinner Traffic Lanes
+    // 5. Instanced Aerial Drone Spinner Traffic Lanes (restrained speed and muted tail/headlights)
     const trafficGeo = new THREE.BoxGeometry(0.45, 0.25, 1);
-    const trafficMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+    const trafficMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: true });
     this.disposableGeometries.push(trafficGeo);
     this.disposableMaterials.push(trafficMat);
 
     this.trafficMesh = new THREE.InstancedMesh(trafficGeo, trafficMat, TRAFFIC_COUNT);
-    const cyanCar = new THREE.Color(0x00f0ff).multiplyScalar(3.0);
-    const redCar = new THREE.Color(0xff1e4d).multiplyScalar(3.0);
+    const cyanCar = new THREE.Color(0x38a0b8).multiplyScalar(1.2);
+    const redCar = new THREE.Color(0xa62020).multiplyScalar(1.2);
 
     for (let i = 0; i < TRAFFIC_COUNT; i++) {
       const isCyan = i % 2 === 0;

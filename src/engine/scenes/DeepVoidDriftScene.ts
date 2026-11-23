@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
 
-const SPARSE_STAR_COUNT = 1400;
+const SPARSE_STAR_COUNT = 850;
 
 // Custom GLSL for sparse, pinpoint stars with distance-based fade in/out
 const SPARSE_STAR_VERT = /* glsl */ `
@@ -29,24 +29,24 @@ const SPARSE_STAR_VERT = /* glsl */ `
     worldPos.z = uCamPos.z + zRel;
 
     // Organic slow twinkle
-    float twinkle = 0.78 + 0.22 * sin(uTime * 0.65 + aPhase * 6.28318);
+    float twinkle = 0.82 + 0.18 * sin(uTime * 0.55 + aPhase * 6.28318);
 
-    // Smoothstep fade out before clipping camera near-plane (near threshold ~ 8.0)
+    // Smoothstep fade out before clipping camera near-plane (near threshold ~ 14.0)
     // Smoothstep fade in at distant boundary (far threshold ~ 340.0)
     float distZ = -zRel;
-    float nearFade = smoothstep(6.0, 32.0, distZ);
+    float nearFade = smoothstep(12.0, 48.0, distZ);
     float farFade = smoothstep(360.0, 180.0, distZ);
     float fade = nearFade * farFade;
 
     vColor = aColor;
-    vAlpha = fade * twinkle;
+    vAlpha = fade * twinkle * 0.78;
 
     vec4 mvPosition = modelViewMatrix * vec4(worldPos, 1.0);
     gl_Position = projectionMatrix * mvPosition;
 
     // Attenuated point size with maximum cap to preserve crisp pinpoint aesthetic
-    float size = aBaseSize * (160.0 / -mvPosition.z) * uPixelRatio;
-    gl_PointSize = clamp(size, 1.2, 5.5);
+    float size = aBaseSize * (120.0 / -mvPosition.z) * uPixelRatio;
+    gl_PointSize = clamp(size, 1.0, 3.8);
   }
 `;
 
@@ -59,12 +59,12 @@ const SPARSE_STAR_FRAG = /* glsl */ `
     float d2 = dot(p, p);
     if (d2 > 0.25) discard;
 
-    // Soft Gaussian pinpoint falloff with hot incandescent core
+    // Soft Gaussian pinpoint falloff with incandescent core
     float core = exp(-d2 * 28.0);
-    float halo = exp(-d2 * 9.0) * 0.45;
+    float halo = exp(-d2 * 9.0) * 0.35;
     float intensity = core + halo;
 
-    gl_FragColor = vec4(vColor * (1.0 + core * 0.8), vAlpha * intensity);
+    gl_FragColor = vec4(vColor * (0.85 + core * 0.35), vAlpha * intensity);
   }
 `;
 
@@ -167,7 +167,7 @@ const GALAXY_SMUDGE_FRAG = /* glsl */ `
     vec3 col = mix(armColor, coreColor, core / max(core + arms, 0.001));
     col += screenDither(gl_FragCoord.xy);
 
-    gl_FragColor = vec4(col * 0.65, alpha * 0.42);
+    gl_FragColor = vec4(col * 0.45, alpha * 0.22);
   }
 `;
 
@@ -338,10 +338,10 @@ const CORONA_HALO_FRAG = /* glsl */ `
     float r = length(p);
     float halo = exp(-r * 4.8) * 0.65 + exp(-r * 12.0) * 0.55;
     float fade = smoothstep(1.0, 0.4, r);
-    float alpha = halo * fade * 0.48;
+    float alpha = halo * fade * 0.24;
     if (alpha < 0.005) discard;
-    vec3 haloCol = mix(vec3(1.0, 0.28, 0.05), vec3(1.0, 0.65, 0.15), exp(-r * 6.0));
-    gl_FragColor = vec4(haloCol * 1.3, alpha);
+    vec3 haloCol = mix(vec3(0.95, 0.28, 0.05), vec3(0.95, 0.60, 0.15), exp(-r * 6.0));
+    gl_FragColor = vec4(haloCol * 0.85, alpha);
   }
 `;
 
@@ -350,11 +350,11 @@ export class DeepVoidDriftScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.62,
-    radius: 0.45,
-    threshold: 0.68,
+    strength: 0.24,
+    radius: 0.42,
+    threshold: 0.92,
   };
-  public readonly exposure = 1.02;
+  public readonly exposure = 0.72;
 
   // Starfield
   private starGeo: THREE.BufferGeometry | null = null;
@@ -383,7 +383,7 @@ export class DeepVoidDriftScene implements ISpatialScene {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x010205);
+    this.scene.background = new THREE.Color(0x010204);
     this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 500);
     this.camera.position.set(0, 0, 0);
   }

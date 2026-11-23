@@ -41,42 +41,43 @@ const WET_ROAD_FRAG = /* glsl */ `
     // Scrolling road coordinates
     vec2 roadCoord = vec2(vWorldPos.x + uTime * 28.0, vWorldPos.z);
 
-    // Asphalt dark base color
-    float grain = hash(floor(roadCoord * 16.0)) * 0.08;
-    vec3 asphalt = vec3(0.045 + grain, 0.05 + grain, 0.06 + grain);
+    // Asphalt dark base color with multi-frequency aggregate grain
+    float grain = (hash(floor(roadCoord * 28.0)) * 0.5 + hash(floor(roadCoord * 56.0)) * 0.5) * 0.045;
+    vec3 asphalt = vec3(0.024 + grain, 0.026 + grain, 0.032 + grain);
 
     // Highway painted dashed center lane lines (Z = 0) and solid edge lines (Z = -5.5, +5.5)
     float centerDash = step(0.45, fract(roadCoord.x * 0.07)) * smoothstep(0.18, 0.08, abs(vWorldPos.z));
     float edgeLine1 = smoothstep(0.16, 0.06, abs(vWorldPos.z - 5.5));
     float edgeLine2 = smoothstep(0.16, 0.06, abs(vWorldPos.z + 5.5));
-    float lines = clamp(centerDash * 0.85 + edgeLine1 * 0.75 + edgeLine2 * 0.75, 0.0, 1.0);
+    float lines = clamp(centerDash * 0.72 + edgeLine1 * 0.65 + edgeLine2 * 0.65, 0.0, 1.0);
 
-    vec3 roadColor = mix(asphalt, vec3(0.72, 0.75, 0.8), lines);
+    vec3 roadColor = mix(asphalt, vec3(0.58, 0.60, 0.64), lines);
 
-    // Wet asphalt mirror sheen & specular pools from passing streetlights
+    // Restrained realistic wet dark-asphalt reflections with roughness modulation (never mirror-white glare)
     vec3 lightAccum = vec3(0.0);
     for (int i = 0; i < 6; i++) {
       vec3 lightPos = uLightPos[i];
       vec3 toLight = lightPos - vWorldPos;
       float dist2 = dot(toLight, toLight);
-      float atten = 1.0 / (1.0 + dist2 * 0.045);
+      float atten = 1.0 / (1.0 + dist2 * 0.055);
 
-      // Elongated anisotropic specular wet reflection streak along road
-      float spec = exp(-abs(vWorldPos.z - lightPos.z) * 1.8) * exp(-abs(vWorldPos.x - lightPos.x) * 0.28);
-      lightAccum += uLightColor[i] * (atten * 0.55 + spec * 0.85);
+      // Anisotropic specular streak modulated by wet asphalt roughness (>= 0.22) & grain
+      float roughnessBreakup = 0.65 + 0.35 * sin(roadCoord.x * 4.2 + grain * 14.0);
+      float spec = exp(-abs(vWorldPos.z - lightPos.z) * 2.4) * exp(-abs(vWorldPos.x - lightPos.x) * 0.38) * roughnessBreakup;
+      lightAccum += uLightColor[i] * (atten * 0.24 + spec * 0.36);
     }
 
-    // Car headlight pool on road ahead of car (car at X = 0, headlights cast to X > 0)
-    vec3 headDir = vWorldPos - (uCarPos + vec3(2.5, 0.4, 0.0));
+    // Car forward headlight pool on road ahead: soft warm mist cone
+    vec3 headDir = vWorldPos - (uCarPos + vec3(2.2, 0.35, 0.0));
     float headDist = length(headDir);
-    float headBeam = smoothstep(22.0, 4.0, headDist) * smoothstep(3.5, 0.0, abs(vWorldPos.z - uCarPos.z));
-    vec3 headlightGlow = vec3(1.0, 0.95, 0.82) * headBeam * 0.65;
+    float headBeam = smoothstep(18.0, 3.5, headDist) * smoothstep(3.2, 0.0, abs(vWorldPos.z - uCarPos.z));
+    vec3 headlightGlow = vec3(0.96, 0.90, 0.75) * headBeam * 0.38;
 
-    // Red taillight reflection behind car (X < 0)
-    vec3 tailDir = vWorldPos - (uCarPos + vec3(-2.4, 0.4, 0.0));
+    // Thin crimson LED taillight road reflection behind car
+    vec3 tailDir = vWorldPos - (uCarPos + vec3(-2.2, 0.35, 0.0));
     float tailDist = length(tailDir);
-    float tailBeam = smoothstep(9.0, 1.0, tailDist) * smoothstep(2.2, 0.0, abs(vWorldPos.z - uCarPos.z));
-    vec3 taillightGlow = vec3(0.95, 0.08, 0.08) * tailBeam * 0.55;
+    float tailBeam = smoothstep(7.5, 0.8, tailDist) * smoothstep(2.0, 0.0, abs(vWorldPos.z - uCarPos.z));
+    vec3 taillightGlow = vec3(0.85, 0.06, 0.06) * tailBeam * 0.32;
 
     // Screen-space interleaved gradient dithering to eliminate 8-bit asphalt banding
     float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
@@ -102,8 +103,9 @@ const HEADLIGHT_CONE_FRAG = /* glsl */ `
     float lengthFade = smoothstep(1.0, 0.08, vUv.x);
     float widthFade = smoothstep(0.5, 0.0, abs(vUv.y - 0.5));
     float dust = 0.85 + 0.15 * sin(vUv.x * 24.0 - uTime * 6.0);
-    float alpha = lengthFade * widthFade * dust * 0.32;
-    gl_FragColor = vec4(1.0, 0.95, 0.85, alpha);
+    // Soft warm mist cone with gentle optical falloff
+    float alpha = lengthFade * widthFade * dust * 0.16;
+    gl_FragColor = vec4(0.96, 0.92, 0.78, alpha);
   }
 `;
 
@@ -184,9 +186,9 @@ const MIDNIGHT_HALO_FRAG = /* glsl */ `
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
     float r = length(p);
-    float halo = exp(-r * 6.5) * 0.65 + exp(-r * 18.0) * 0.55;
+    float halo = exp(-r * 6.5) * 0.45 + exp(-r * 18.0) * 0.35;
     float fade = smoothstep(1.0, 0.35, r);
-    float alpha = halo * fade * 0.52;
+    float alpha = halo * fade * 0.22;
     if (alpha < 0.005) discard;
     vec3 haloCol = vec3(0.68, 0.84, 1.0);
     gl_FragColor = vec4(haloCol, alpha);
@@ -236,11 +238,11 @@ export class MidnightCruiseScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.85,
-    radius: 0.58,
-    threshold: 0.55,
+    strength: 0.30,
+    radius: 0.50,
+    threshold: 0.88,
   };
-  public readonly exposure = 1.04;
+  public readonly exposure = 0.80;
 
   // Car Components
   private carGroup = new THREE.Group();
@@ -379,26 +381,26 @@ export class MidnightCruiseScene implements ISpatialScene {
   }
 
   private buildCar(): void {
-    // Sleek aerodynamic GT chassis
-    const bodyGeo = new THREE.BoxGeometry(4.4, 0.85, 1.95);
+    // Sleek, low-slung aerodynamic fastback coupe chassis
+    const bodyGeo = new THREE.BoxGeometry(4.6, 0.70, 1.95);
     const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x0c111c,
-      roughness: 0.18,
-      metalness: 0.88,
+      color: 0x070b14,
+      roughness: 0.24,
+      metalness: 0.85,
     });
     this.disposableGeometries.push(bodyGeo);
     this.disposableMaterials.push(bodyMat);
 
     this.carBodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    this.carBodyMesh.position.set(0, 0.72, 0);
+    this.carBodyMesh.position.set(0, 0.65, 0);
     this.carGroup.add(this.carBodyMesh);
 
-    // Aerodynamic greenhouse / cabin glass
-    const cabinGeo = new THREE.BoxGeometry(2.3, 0.58, 1.62);
+    // Sculpted curved fastback cabin with deep tinted glass
+    const cabinGeo = new THREE.BoxGeometry(2.4, 0.52, 1.58);
     const cabinMat = new THREE.MeshStandardMaterial({
-      color: 0x060910,
-      roughness: 0.08,
-      metalness: 0.95,
+      color: 0x04060c,
+      roughness: 0.12,
+      metalness: 0.92,
       transparent: true,
       opacity: 0.88,
     });
@@ -406,32 +408,42 @@ export class MidnightCruiseScene implements ISpatialScene {
     this.disposableMaterials.push(cabinMat);
 
     const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
-    cabinMesh.position.set(-0.25, 1.32, 0);
+    cabinMesh.position.set(-0.35, 1.18, 0);
     this.carGroup.add(cabinMesh);
 
-    // Glowing warm LED headlights
-    const hlGeo = new THREE.BoxGeometry(0.12, 0.18, 0.42);
+    // Warm tungsten dashboard silhouette glowing faintly inside tinted cabin
+    const dashGeo = new THREE.BoxGeometry(0.35, 0.08, 1.05);
+    const dashMat = new THREE.MeshBasicMaterial({ color: 0xd99b52 });
+    this.disposableGeometries.push(dashGeo);
+    this.disposableMaterials.push(dashMat);
+
+    const dashMesh = new THREE.Mesh(dashGeo, dashMat);
+    dashMesh.position.set(0.38, 0.98, 0);
+    this.carGroup.add(dashMesh);
+
+    // Glowing warm LED projector headlight slits
+    const hlGeo = new THREE.BoxGeometry(0.12, 0.14, 0.36);
     const hlMat = new THREE.MeshBasicMaterial({ color: 0xfffaed });
     this.disposableGeometries.push(hlGeo);
     this.disposableMaterials.push(hlMat);
 
     const hlMesh = new THREE.Mesh(hlGeo, hlMat);
-    hlMesh.position.set(2.22, 0.72, 0.65);
+    hlMesh.position.set(2.31, 0.68, 0.65);
     const hrMesh = hlMesh.clone();
     hrMesh.position.z = -0.65;
     this.carGroup.add(hlMesh, hrMesh);
 
-    // Glowing red LED taillight lightbar
-    const tlGeo = new THREE.BoxGeometry(0.1, 0.14, 1.8);
-    const tlMat = new THREE.MeshBasicMaterial({ color: 0xff1e27 });
+    // Thin sleek crimson LED taillight lightbar
+    const tlGeo = new THREE.BoxGeometry(0.08, 0.09, 1.82);
+    const tlMat = new THREE.MeshBasicMaterial({ color: 0xd91624 });
     this.disposableGeometries.push(tlGeo);
     this.disposableMaterials.push(tlMat);
 
     const tlMesh = new THREE.Mesh(tlGeo, tlMat);
-    tlMesh.position.set(-2.22, 0.78, 0);
+    tlMesh.position.set(-2.31, 0.72, 0);
     this.carGroup.add(tlMesh);
 
-    // Volumetric forward headlight projection beam cone
+    // Volumetric forward headlight projection beam cone (warm soft mist cone)
     const coneGeo = new THREE.PlaneGeometry(16, 5.2);
     coneGeo.rotateZ(Math.PI / 2);
     coneGeo.rotateY(Math.PI / 2);
@@ -452,22 +464,22 @@ export class MidnightCruiseScene implements ISpatialScene {
     this.headlightCone.position.set(10.2, 0.65, 0);
     this.carGroup.add(this.headlightCone);
 
-    // 4 Wheels with alloy rims
-    const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.32, 16);
+    // 4 Wheels with alloy rims & smooth rotation
+    const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.32, 16);
     wheelGeo.rotateX(Math.PI / 2);
     const wheelMat = new THREE.MeshStandardMaterial({
-      color: 0x111622,
-      roughness: 0.45,
-      metalness: 0.65,
+      color: 0x181e28,
+      roughness: 0.28,
+      metalness: 0.85,
     });
     this.disposableGeometries.push(wheelGeo);
     this.disposableMaterials.push(wheelMat);
 
     const wheelOffsets = [
-      [1.35, 0.38, 0.95],
-      [1.35, 0.38, -0.95],
-      [-1.35, 0.38, 0.95],
-      [-1.35, 0.38, -0.95],
+      [1.35, 0.36, 0.95],
+      [1.35, 0.36, -0.95],
+      [-1.35, 0.36, 0.95],
+      [-1.35, 0.36, -0.95],
     ];
 
     for (const [wx, wy, wz] of wheelOffsets) {
@@ -487,7 +499,7 @@ export class MidnightCruiseScene implements ISpatialScene {
     const lampGeo = new THREE.BoxGeometry(0.8, 0.15, 0.35);
 
     const poleMat = new THREE.MeshStandardMaterial({
-      color: 0x182030,
+      color: 0x141a24,
       roughness: 0.6,
       metalness: 0.8,
     });
@@ -504,15 +516,15 @@ export class MidnightCruiseScene implements ISpatialScene {
       arm.position.set(0.9, 7.3, 0);
       group.add(arm);
 
-      const isAmber = i % 2 === 0;
+      // Clean warm sodium-vapor amber streetlights spaced overhead
       const lampMat = new THREE.MeshBasicMaterial({
-        color: isAmber ? 0xffaa33 : 0x93c5fd,
+        color: 0xd98822,
       });
       const lamp = new THREE.Mesh(lampGeo, lampMat);
       lamp.position.set(1.9, 7.2, 0);
       group.add(lamp);
 
-      group.position.set((i - STREETLIGHT_COUNT * 0.5) * 24, 0, -6.8);
+      group.position.set((i - STREETLIGHT_COUNT * 0.5) * 28, 0, -6.8);
       this.streetlightGroup.add(group);
     }
 

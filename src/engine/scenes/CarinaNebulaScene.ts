@@ -19,16 +19,16 @@ const STARFIELD_VERTEX_SHADER = /* glsl */ `
   void main() {
     vec3 pos = position;
 
-    // Subtle twinkling luminosity modulation
-    float twinkle = 0.65 + 0.35 * sin(uTime * aTwinkleSpeed + aPhase * 6.28318);
+    // Twinkling luminosity modulation (subtle, low-glare)
+    float twinkle = 0.72 + 0.28 * sin(uTime * aTwinkleSpeed + aPhase * 6.28318);
     float flare = pow(0.5 + 0.5 * sin(uTime * aTwinkleSpeed * 1.5 + aPhase), 8.0);
 
-    vColor = aColor * (1.0 + flare * 1.6);
-    vAlpha = (0.55 + 0.45 * twinkle);
+    vColor = aColor * (0.85 + flare * 0.65);
+    vAlpha = (0.32 + 0.35 * twinkle);
 
     vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mvPos;
-    gl_PointSize = clamp(aSize * uPixelRatio * (280.0 / -mvPos.z) * (0.8 + 0.4 * flare), 1.0, 7.0);
+    gl_PointSize = clamp(aSize * uPixelRatio * (200.0 / -mvPos.z) * (0.75 + 0.25 * flare), 1.0, 4.2);
   }
 `;
 
@@ -40,8 +40,10 @@ const STARFIELD_FRAGMENT_SHADER = /* glsl */ `
     float d = length(gl_PointCoord - 0.5);
     if (d > 0.5) discard;
     float core = exp(-d * d * 28.0);
-    float halo = 0.25 * exp(-d * d * 8.0);
-    gl_FragColor = vec4(vColor * (1.0 + core * 0.7), (core + halo) * vAlpha);
+    float halo = 0.20 * exp(-d * d * 8.0);
+    // Soft HDR shoulder compression preserves star hue
+    vec3 col = vColor / (vec3(1.0) + vColor * 0.5);
+    gl_FragColor = vec4(col * (0.85 + core * 0.4), (core + halo) * vAlpha * 0.75);
   }
 `;
 
@@ -137,24 +139,38 @@ const NEBULA_FRAGMENT_SHADER = /* glsl */ `
 
     float density = smoothstep(-0.25, 0.65, n1 + n2 * 0.45) * softEdge;
 
-    // Color grading: Deep Indigo -> Cosmic Teal -> Warm Amber Gold with deeper dark absorption lanes
-    float heat = clamp(n1 * 0.95 + n2 * 0.6 + 0.3, 0.0, 1.0);
-    vec3 col = mix(uColorA, uColorB, smoothstep(0.12, 0.52, heat));
-    col = mix(col, uColorC, smoothstep(0.52, 0.92, heat));
+    // Sculpted absorbing cosmic dust pillars (dark umber/charcoal occlusion layers)
+    float dustNoise = fbm(samplePos * 1.25 + vec3(-uTime * 0.008, 0.0, 1.4));
+    float dustOcclusion = smoothstep(0.18, 0.68, dustNoise);
 
-    // Localized energetic core boost on ion ridges
-    float coreSparkle = pow(clamp(heat, 0.0, 1.0), 3.2);
-    col += uColorC * coreSparkle * 0.75;
+    // Color grading: Midnight Indigo -> Muted Deep Teal -> Smoky Violet -> Warm Gold Ridges
+    float heat = clamp(n1 * 0.95 + n2 * 0.6 + 0.3, 0.0, 1.0);
+    vec3 smokyViolet = vec3(0.24, 0.10, 0.32);
+    vec3 col = mix(uColorA, uColorB, smoothstep(0.12, 0.48, heat));
+    col = mix(col, smokyViolet, smoothstep(0.48, 0.72, heat));
+    col = mix(col, uColorC, smoothstep(0.72, 0.95, heat));
+
+    // Subtle warm gold rim-lit ridges without harsh core blowout
+    float rimGlow = pow(clamp(heat, 0.0, 1.0), 3.2);
+    col += uColorC * rimGlow * 0.32;
+
+    // Absorbing cosmic dust pillars: silhouetted dark umber/charcoal carving into illuminated gas
+    vec3 charcoalUmber = vec3(0.018, 0.012, 0.009);
+    col = mix(col, charcoalUmber, dustOcclusion * 0.88);
+
+    // Soft HDR shoulder compression preserves deep hue saturation instead of summing to white
+    col = col / (vec3(1.0) + col * 0.55);
 
     // Smooth camera near-fade eliminates popping when camera flies through nebula slabs
     float camDist = length(vWorldPos - cameraPosition);
     float nearFade = smoothstep(6.0, 24.0, camDist);
 
     // Screen-space dithering eliminates 8-bit banding on dark nebula gradients
-    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.006;
+    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.005;
     col += dither;
 
-    float alpha = density * 0.32 * nearFade;
+    // Drastically cut additive cloud opacity (0.12 base) so depth reads cleanly
+    float alpha = density * (0.11 + (1.0 - dustOcclusion) * 0.05) * nearFade;
     if (alpha < 0.002) discard;
 
     gl_FragColor = vec4(col, alpha);
@@ -166,11 +182,11 @@ export class CarinaNebulaScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.92,
-    radius: 0.65,
-    threshold: 0.48,
+    strength: 0.30,
+    radius: 0.50,
+    threshold: 0.88,
   };
-  public readonly exposure = 1.06;
+  public readonly exposure = 0.76;
 
   private starPoints: THREE.Points | null = null;
   private starGeo: THREE.BufferGeometry | null = null;
@@ -186,7 +202,7 @@ export class CarinaNebulaScene implements ISpatialScene {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x02030a);
+    this.scene.background = new THREE.Color(0x010206);
     this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 350);
     this.camera.position.set(0, 0, 30);
   }
@@ -249,10 +265,10 @@ export class CarinaNebulaScene implements ISpatialScene {
     this.starPoints.frustumCulled = false;
     this.scene.add(this.starPoints);
 
-    // 2. Multi-Layer Volumetric Nebula Planes (FBM deep space dust slabs)
-    const colorA = new THREE.Color(0x1e1b4b); // Deep Indigo
-    const colorB = new THREE.Color(0x0d9488); // Cosmic Teal
-    const colorC = new THREE.Color(0xf59e0b); // Warm Amber Gold
+    // 2. Multi-Layer Volumetric Nebula Planes (Muted deep-space ionized gas)
+    const colorA = new THREE.Color(0x0c1328); // Midnight Indigo
+    const colorB = new THREE.Color(0x0a5c63); // Muted Deep Teal
+    const colorC = new THREE.Color(0xb57822); // Subtle Warm Gold Ridges
 
     for (let i = 0; i < NEBULA_SLAB_COUNT; i++) {
       const w = 70 + (i % 4) * 15;

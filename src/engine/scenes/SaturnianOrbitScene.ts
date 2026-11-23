@@ -66,20 +66,20 @@ const SATURN_PLANET_FRAG = /* glsl */ `
     vec2 cloudCoord = vec2(vUv.x * 14.0 + windOffset, lat);
     float turbulence = fbm(cloudCoord) * 0.45 + fbm(cloudCoord * 2.5 - vec2(uTime * 0.015, 0.0)) * 0.25;
 
-    // Saturnian atmospheric color bands: Pale ochre -> Warm butterscotch -> Soft cream -> Hazel amber
-    vec3 colOchre = vec3(0.88, 0.78, 0.58);
-    vec3 colButter = vec3(0.96, 0.86, 0.65);
-    vec3 colCream = vec3(0.98, 0.94, 0.82);
-    vec3 colAmber = vec3(0.72, 0.58, 0.42);
+    // Saturnian atmospheric color bands: Muted ochre -> Soft cream -> Slate-brown turbulent storm bands
+    vec3 colOchre = vec3(0.74, 0.62, 0.45);
+    vec3 colButter = vec3(0.84, 0.72, 0.52);
+    vec3 colCream = vec3(0.88, 0.82, 0.70);
+    vec3 colSlateBrown = vec3(0.50, 0.38, 0.28);
 
     float bandPattern = sin(lat + turbulence * 3.8);
     vec3 surfaceColor = mix(colOchre, colButter, smoothstep(-0.8, 0.1, bandPattern));
     surfaceColor = mix(surfaceColor, colCream, smoothstep(0.1, 0.65, bandPattern));
-    surfaceColor = mix(surfaceColor, colAmber, smoothstep(0.65, 1.0, bandPattern));
+    surfaceColor = mix(surfaceColor, colSlateBrown, smoothstep(0.65, 1.0, bandPattern));
 
-    // Solar illumination with smooth terminator
+    // Dramatic low-key cinematic side-lighting with crisp terminator (deep dark nightside)
     float NdotL = dot(N, L);
-    float directLight = smoothstep(-0.05, 0.22, NdotL);
+    float directLight = smoothstep(-0.02, 0.18, NdotL);
 
     // Calculate ring shadow projected onto planet sphere:
     // Cast ray from point toward sun; check if it intersects equatorial ring plane y=0
@@ -90,24 +90,24 @@ const SATURN_PLANET_FRAG = /* glsl */ `
         vec3 hit = vWorldPos + L * tRing;
         float rHit = length(hit.xz);
         if (rHit >= uRingInner && rHit <= uRingOuter) {
-          // Inside ring shadow band; modulate by Cassini division gap
-          float isCassini = smoothstep(0.04, 0.0, abs(rHit - (uRingInner + (uRingOuter - uRingInner) * 0.48)));
-          ringShadow = mix(0.12, 0.85, isCassini);
+          // Inside ring shadow band; modulate by razor-sharp Cassini division gap
+          float isCassini = smoothstep(0.035, 0.0, abs(rHit - (uRingInner + (uRingOuter - uRingInner) * 0.485)));
+          ringShadow = mix(0.05, 0.72, isCassini);
         }
       }
     }
 
-    // Rayleigh scattering atmospheric limb glow
+    // Delicate, restrained atmospheric limb Fresnel (prevents blinding white halo)
     float fresnel = 1.0 - max(dot(N, V), 0.0);
-    float rimGlow = pow(fresnel, 3.2) * max(NdotL + 0.35, 0.0);
-    vec3 rimColor = mix(vec3(0.55, 0.82, 1.0), vec3(1.0, 0.85, 0.55), clamp(NdotL, 0.0, 1.0));
+    float rimGlow = pow(fresnel, 4.2) * max(NdotL + 0.15, 0.0);
+    vec3 rimColor = mix(vec3(0.32, 0.60, 0.82), vec3(0.82, 0.68, 0.45), clamp(NdotL, 0.0, 1.0));
 
-    // Ambient nightside starlight scatter
-    vec3 nightAmbient = vec3(0.015, 0.018, 0.026);
+    // Deep interstellar dark nightside ambient
+    vec3 nightAmbient = vec3(0.004, 0.006, 0.009);
 
     // Screen-space dithering eliminates 8-bit banding across the gas giant terminator
     float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.005;
-    vec3 finalColor = surfaceColor * (directLight * ringShadow) + nightAmbient + (rimColor * rimGlow * 0.95) + dither;
+    vec3 finalColor = surfaceColor * (directLight * ringShadow) + nightAmbient + (rimColor * rimGlow * 0.32) + dither;
     gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
@@ -141,16 +141,15 @@ const SATURN_RING_FRAG = /* glsl */ `
 
     float normR = (r - uRingInner) / (uRingOuter - uRingInner);
 
-    // Multiband ring albedo density & gaps
-    // Cassini division at normR ~ 0.46..0.52
-    float cassini = 1.0 - smoothstep(0.028, 0.005, abs(normR - 0.485));
+    // Multiband ring albedo density & gaps with razor-sharp Cassini Division
+    float cassini = 1.0 - smoothstep(0.022, 0.004, abs(normR - 0.485));
     // Encke gap at normR ~ 0.82
-    float encke = 1.0 - smoothstep(0.012, 0.002, abs(normR - 0.82));
+    float encke = 1.0 - smoothstep(0.010, 0.002, abs(normR - 0.82));
 
     // High-frequency icy micro-ringlets
     float microRings = 0.5 + 0.5 * sin(normR * 280.0) + 0.25 * sin(normR * 680.0);
 
-    float bandAlpha = (0.42 + 0.45 * microRings) * cassini * encke;
+    float bandAlpha = (0.35 + 0.36 * microRings) * cassini * encke;
 
     // Check planet eclipse shadow cast onto rings:
     // Cylinder shadow along Sun direction: dot(P, SunDir) < 0 && distance to sun axis < PlanetRadius
@@ -161,14 +160,14 @@ const SATURN_RING_FRAG = /* glsl */ `
     float planetShadow = 1.0;
     if (proj < 0.0 && perpDistSq < (uPlanetRadius * uPlanetRadius * 1.02)) {
       float distToEdge = uPlanetRadius - sqrt(max(perpDistSq, 0.0));
-      planetShadow = smoothstep(0.0, 0.45, -distToEdge);
+      planetShadow = smoothstep(0.0, 0.25, -distToEdge);
     }
 
-    vec3 ringIceCol = mix(vec3(0.92, 0.84, 0.68), vec3(0.96, 0.92, 0.84), microRings);
+    vec3 ringIceCol = mix(vec3(0.78, 0.70, 0.56), vec3(0.85, 0.80, 0.70), microRings);
 
     // Screen-space dither prevents color quantization on shadow transition
     float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.004;
-    vec3 litColor = ringIceCol * (planetShadow * 0.92 + 0.08) + dither;
+    vec3 litColor = ringIceCol * (planetShadow * 0.88 + 0.03) + dither;
 
     gl_FragColor = vec4(litColor, bandAlpha);
   }
@@ -204,11 +203,11 @@ export class SaturnianOrbitScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.78,
-    radius: 0.54,
-    threshold: 0.52,
+    strength: 0.26,
+    radius: 0.45,
+    threshold: 0.90,
   };
-  public readonly exposure = 1.04;
+  public readonly exposure = 0.76;
 
   private planetMesh: THREE.Mesh | null = null;
   private planetGeo: THREE.SphereGeometry | null = null;

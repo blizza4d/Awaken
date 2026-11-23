@@ -78,10 +78,12 @@ const JELLY_BELL_FRAG = /* glsl */ `
     float alpha = clamp(fresnel * 0.88 + veins * 0.85 + rimGlow * 0.8 + vContraction * 0.28, 0.0, 1.0);
     if (alpha < 0.005) discard;
 
-    vec3 finalCol = glowColor * (fresnel * 1.8 + veins * 2.4 + rimGlow * 2.2 + 0.3);
+    vec3 emissive = glowColor * (fresnel * 0.95 + veins * 1.15 + rimGlow * 1.1 + 0.22);
+    // Soft HDR shoulder compression to prevent chalky white blowouts
+    vec3 finalCol = emissive / (1.0 + emissive * 0.65);
     finalCol += screenDither(gl_FragCoord.xy);
 
-    gl_FragColor = vec4(finalCol, alpha * 0.85);
+    gl_FragColor = vec4(finalCol, alpha * 0.82);
   }
 `;
 
@@ -136,10 +138,12 @@ const TENTACLE_FRAG = /* glsl */ `
     vec3 magenta = vec3(0.851, 0.275, 0.937);
     vec3 col = mix(cyan, magenta, colorShift);
 
-    float alpha = (fresnel * 0.75 + 0.35) * tipFade * 0.78;
+    float alpha = (fresnel * 0.65 + 0.25) * tipFade * 0.65;
     if (alpha < 0.005) discard;
 
-    gl_FragColor = vec4(col * (1.2 + fresnel * 1.5), alpha);
+    vec3 tentCol = col * (0.85 + fresnel * 0.95);
+    tentCol = tentCol / (1.0 + tentCol * 0.5);
+    gl_FragColor = vec4(tentCol, alpha);
   }
 `;
 
@@ -246,11 +250,11 @@ export class AbyssalDriftScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.92,
-    radius: 0.55,
-    threshold: 0.48,
+    strength: 0.26,
+    radius: 0.45,
+    threshold: 0.90,
   };
-  public readonly exposure = 1.04;
+  public readonly exposure = 0.76;
 
   private hazeQuad: THREE.Mesh | null = null;
   private hazeGeo: THREE.PlaneGeometry | null = null;

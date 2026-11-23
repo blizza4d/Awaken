@@ -100,14 +100,15 @@ const FLUID_VERTEX_SHADER = /* glsl */ `
   }
 
   void main() {
-    float slowT = uTime * 0.16;
+    // Slower flow velocity for a hypnotic, calming ambient rhythm
+    float slowT = uTime * 0.075;
     float phase = aSeed.w;
 
     // Base fiber-optic ribbon flow along helical torus-manifold
-    float angle = aSeed.x + slowT * (0.45 + aStream.x * 0.35);
+    float angle = aSeed.x + slowT * (0.35 + aStream.x * 0.28);
     float ringR = 5.4 + aSeed.y * 2.8 + sin(angle * 2.0 + slowT) * 0.9;
-    float tubeAngle = aSeed.z + slowT * 0.7 + aStream.x * 6.28318;
-    float tubeR = 1.65 + sin(phase * 6.28318 + slowT * 1.4) * 0.9;
+    float tubeAngle = aSeed.z + slowT * 0.55 + aStream.x * 6.28318;
+    float tubeR = 1.65 + sin(phase * 6.28318 + slowT * 1.2) * 0.9;
 
     vec3 basePos = vec3(
       (ringR + tubeR * cos(tubeAngle)) * cos(angle),
@@ -115,46 +116,47 @@ const FLUID_VERTEX_SHADER = /* glsl */ `
       (ringR + tubeR * cos(tubeAngle)) * sin(angle)
     );
 
-    // Advect along GPU 3D Curl Noise field for organic bioluminescent fluid streams
-    vec3 flowSample = basePos * 0.22 + vec3(slowT * 0.45, -slowT * 0.3, slowT * 0.25);
+    // Advect along GPU 3D Curl Noise field for silky bioluminescent fluid streams
+    vec3 flowSample = basePos * 0.20 + vec3(slowT * 0.35, -slowT * 0.24, slowT * 0.20);
     vec3 curl1 = curlNoise(flowSample);
-    vec3 curl2 = curlNoise(flowSample * 1.85 + vec3(11.3, 4.7, -7.1) - slowT * 0.35);
+    vec3 curl2 = curlNoise(flowSample * 1.85 + vec3(11.3, 4.7, -7.1) - slowT * 0.25);
 
-    vec3 displaced = basePos + curl1 * 2.45 + curl2 * 1.05;
+    vec3 displaced = basePos + curl1 * 2.2 + curl2 * 0.95;
 
     // Gentle magnetic repulsion/attraction around user pointer
     vec3 pointerWorld = vec3(uPointer.x * 9.0, uPointer.y * 5.0, 2.0);
     vec3 toPtr = displaced - pointerWorld;
     float ptrDist = length(toPtr);
-    displaced += normalize(toPtr + 1e-4) * exp(-ptrDist * 0.28) * 1.45;
+    displaced += normalize(toPtr + 1e-4) * exp(-ptrDist * 0.28) * 1.35;
 
     // 10-minute OLED Burn-In Prevention Orbital Drift
     displaced.xy += uOledDrift;
 
-    // Fiber-optic pulse travelling along stream filaments
-    float pulse = 0.5 + 0.5 * sin(phase * 18.0 - uTime * 1.65 + aStream.x * 12.0);
+    // Gentle pulse travelling along stream filaments
+    float pulse = 0.5 + 0.5 * sin(phase * 18.0 - uTime * 1.2 + aStream.x * 12.0);
     float sparkle = pow(pulse, 4.0);
 
     // Scale instanced micro-sphere subtly with fluid pulse
-    float particleScale = (0.45 + aStream.y * 0.72) * (0.72 + sparkle * 0.85);
+    float particleScale = (0.42 + aStream.y * 0.65) * (0.75 + sparkle * 0.55);
 
-    // Color ramp: Deep Cyan -> Electric Violet -> Molten Gold
-    vec3 deepCyan = vec3(0.0, 0.88, 1.0);
-    vec3 electricViolet = vec3(0.56, 0.16, 1.0);
-    vec3 moltenGold = vec3(1.0, 0.68, 0.1);
+    // Color ramp: Deep Sapphire -> Muted Cyan -> Royal Violet -> Faint Gold threads
+    vec3 deepSapphire = vec3(0.06, 0.28, 0.85);
+    vec3 mutedCyan = vec3(0.08, 0.65, 0.78);
+    vec3 royalViolet = vec3(0.48, 0.14, 0.85);
+    vec3 faintGold = vec3(0.85, 0.62, 0.18);
 
-    float colorWave = fract(aStream.x + uTime * 0.032 + dot(curl1, vec3(0.25, 0.35, 0.2)) * 0.45);
+    float colorWave = fract(aStream.x + uTime * 0.024 + dot(curl1, vec3(0.25, 0.35, 0.2)) * 0.45);
     vec3 col;
-    if (colorWave < 0.42) {
-      col = mix(deepCyan, electricViolet, smoothstep(0.0, 0.42, colorWave));
-    } else if (colorWave < 0.78) {
-      col = mix(electricViolet, moltenGold, smoothstep(0.42, 0.78, colorWave));
+    if (colorWave < 0.38) {
+      col = mix(deepSapphire, mutedCyan, smoothstep(0.0, 0.38, colorWave));
+    } else if (colorWave < 0.72) {
+      col = mix(mutedCyan, royalViolet, smoothstep(0.38, 0.72, colorWave));
     } else {
-      col = mix(moltenGold, deepCyan, smoothstep(0.78, 1.0, colorWave));
+      col = mix(royalViolet, faintGold, smoothstep(0.72, 1.0, colorWave));
     }
 
-    // Localized HDR bloom boost strictly on energetic fiber crests (prevents whiteout)
-    float hdrGain = 0.38 + sparkle * 1.45;
+    // Controlled luminance gain strictly on ribbon crests (never blows out to white)
+    float hdrGain = 0.30 + sparkle * 0.55;
     vColor = col * hdrGain;
     vIntensity = hdrGain;
 
@@ -172,9 +174,11 @@ const FLUID_FRAGMENT_SHADER = /* glsl */ `
 
   void main() {
     float fogFactor = smoothstep(36.0, 10.0, vDepth);
-    // Lightweight screen-space dither prevents banding on dark obsidian void
+    // Screen-space dither prevents banding on dark obsidian void
     float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.003;
-    vec3 finalCol = (vColor + dither) * fogFactor;
+    // Soft HDR shoulder compression preserves rich ribbon saturation
+    vec3 col = vColor / (vec3(1.0) + vColor * 0.65);
+    vec3 finalCol = (col + dither) * fogFactor;
     gl_FragColor = vec4(finalCol, 1.0);
   }
 `;
@@ -184,11 +188,11 @@ export class FluidDataScene implements ISpatialScene {
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
   public readonly bloomPreset: BloomPreset = {
-    strength: 0.88,
-    radius: 0.52,
-    threshold: 0.58,
+    strength: 0.28,
+    radius: 0.45,
+    threshold: 0.90,
   };
-  public readonly exposure = 1.02;
+  public readonly exposure = 0.76;
 
   private mesh: THREE.InstancedMesh | null = null;
   private geometry: THREE.BufferGeometry | null = null;

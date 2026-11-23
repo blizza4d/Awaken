@@ -14,8 +14,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#2dd4bf', // Teal
     accentSecondary: '#6366f1', // Indigo
     accentTertiary: '#f59e0b', // Amber
-    bloom: { strength: 0.92, radius: 0.65, threshold: 0.48 },
-    exposure: 1.06,
+    bloom: { strength: 0.30, radius: 0.50, threshold: 0.88 },
+    exposure: 0.76,
   },
   {
     id: 'binary-pulsar',
@@ -30,8 +30,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#00f0ff', // Cyan
     accentSecondary: '#ec4899', // Magenta
     accentTertiary: '#facc15', // Gold
-    bloom: { strength: 0.92, radius: 0.54, threshold: 0.52 },
-    exposure: 1.08,
+    bloom: { strength: 0.32, radius: 0.48, threshold: 0.90 },
+    exposure: 0.78,
   },
   {
     id: 'saturnian-orbit',
@@ -46,8 +46,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#f59e0b', // Amber
     accentSecondary: '#38bdf8', // Azure
     accentTertiary: '#fde68a', // Cream
-    bloom: { strength: 0.78, radius: 0.54, threshold: 0.52 },
-    exposure: 1.04,
+    bloom: { strength: 0.26, radius: 0.45, threshold: 0.90 },
+    exposure: 0.76,
   },
   {
     id: 'event-horizon',
@@ -62,8 +62,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#ff6a00',
     accentSecondary: '#38bdf8',
     accentTertiary: '#fde047',
-    bloom: { strength: 0.82, radius: 0.56, threshold: 0.62 },
-    exposure: 0.96,
+    bloom: { strength: 0.35, radius: 0.48, threshold: 0.90 },
+    exposure: 0.75,
   },
   {
     id: 'fluid-data',
@@ -78,8 +78,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#00f0ff',
     accentSecondary: '#8b5cf6',
     accentTertiary: '#fbbf24',
-    bloom: { strength: 0.88, radius: 0.52, threshold: 0.58 },
-    exposure: 1.02,
+    bloom: { strength: 0.28, radius: 0.45, threshold: 0.90 },
+    exposure: 0.76,
   },
   {
     id: 'volumetric-megacity',
@@ -94,8 +94,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#ff2a85',
     accentSecondary: '#00f0ff',
     accentTertiary: '#ff9f1c',
-    bloom: { strength: 0.76, radius: 0.52, threshold: 0.58 },
-    exposure: 1.04,
+    bloom: { strength: 0.32, radius: 0.48, threshold: 0.88 },
+    exposure: 0.80,
   },
   {
     id: 'deep-void-drift',
@@ -110,8 +110,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#a78bfa',
     accentSecondary: '#38bdf8',
     accentTertiary: '#f87171',
-    bloom: { strength: 0.62, radius: 0.45, threshold: 0.68 },
-    exposure: 1.02,
+    bloom: { strength: 0.24, radius: 0.42, threshold: 0.92 },
+    exposure: 0.72,
   },
   {
     id: 'midnight-cruise',
@@ -126,8 +126,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#f59e0b',
     accentSecondary: '#38bdf8',
     accentTertiary: '#ef4444',
-    bloom: { strength: 0.85, radius: 0.58, threshold: 0.55 },
-    exposure: 1.04,
+    bloom: { strength: 0.30, radius: 0.50, threshold: 0.88 },
+    exposure: 0.80,
   },
   {
     id: 'moonlit-shore',
@@ -158,8 +158,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#1df2a0',
     accentSecondary: '#14b5d0',
     accentTertiary: '#8c46ff',
-    bloom: { strength: 0.95, radius: 0.62, threshold: 0.45 },
-    exposure: 1.05,
+    bloom: { strength: 0.30, radius: 0.48, threshold: 0.88 },
+    exposure: 0.78,
   },
   {
     id: 'nocturne-glass',
@@ -174,8 +174,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#f59e0b',
     accentSecondary: '#06b6d4',
     accentTertiary: '#ef4444',
-    bloom: { strength: 0.88, radius: 0.58, threshold: 0.52 },
-    exposure: 1.04,
+    bloom: { strength: 0.26, radius: 0.45, threshold: 0.88 },
+    exposure: 0.80,
   },
   {
     id: 'abyssal-drift',
@@ -190,8 +190,8 @@ export const SPATIAL_SCENES: SceneMeta[] = [
     accentPrimary: '#18e8ff',
     accentSecondary: '#d946ef',
     accentTertiary: '#2b5cff',
-    bloom: { strength: 0.92, radius: 0.55, threshold: 0.48 },
-    exposure: 1.04,
+    bloom: { strength: 0.26, radius: 0.45, threshold: 0.90 },
+    exposure: 0.76,
   },
   {
     id: 'oled-void',

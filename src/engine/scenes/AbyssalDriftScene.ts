@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
+import { GLSL_DITHER, GLSL_TONEMAP_SHOULDER } from '../shaders/common';
 
 const JELLY_COUNT = 4;
 const MARINE_SNOW_COUNT = 1400;
@@ -49,9 +50,8 @@ const JELLY_BELL_FRAG = /* glsl */ `
   varying vec2 vUv;
   varying float vContraction;
 
-  float screenDither(vec2 fc) {
-    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
-  }
+  ${GLSL_DITHER}
+  ${GLSL_TONEMAP_SHOULDER}
 
   void main() {
     float NdotV = max(0.0, dot(normalize(vNormal), normalize(vViewDir)));
@@ -65,14 +65,14 @@ const JELLY_BELL_FRAG = /* glsl */ `
     // Margin rim organs (rhopalia)
     float rimGlow = smoothstep(0.12, 0.0, vUv.y) * 1.5;
 
-    // Color shift: bioluminescent cyan (#18e8ff), deep cobalt (#2b5cff), orchid magenta (#d946ef)
+    // Color shift: deep electric cyan (#14c8e8), cobalt (#2855e8), faint orchid violet (#b83ae0)
     float colorShift = sin(uTime * 0.5 + uPhase) * 0.5 + 0.5;
-    vec3 cyan = vec3(0.094, 0.91, 1.0);
-    vec3 cobalt = vec3(0.169, 0.361, 1.0);
-    vec3 magenta = vec3(0.851, 0.275, 0.937);
+    vec3 cyan = vec3(0.078, 0.784, 0.910);
+    vec3 cobalt = vec3(0.157, 0.333, 0.910);
+    vec3 orchid = vec3(0.722, 0.227, 0.878);
 
     vec3 glowColor = mix(cyan, cobalt, colorShift);
-    glowColor = mix(glowColor, magenta, veins * 0.65 + vContraction * 0.35);
+    glowColor = mix(glowColor, orchid, veins * 0.65 + vContraction * 0.35);
 
     // Transparent dark interior core with luminous glowing edges
     float alpha = clamp(fresnel * 0.88 + veins * 0.85 + rimGlow * 0.8 + vContraction * 0.28, 0.0, 1.0);
@@ -80,7 +80,7 @@ const JELLY_BELL_FRAG = /* glsl */ `
 
     vec3 emissive = glowColor * (fresnel * 0.95 + veins * 1.15 + rimGlow * 1.1 + 0.22);
     // Soft HDR shoulder compression to prevent chalky white blowouts
-    vec3 finalCol = emissive / (1.0 + emissive * 0.65);
+    vec3 finalCol = softHdrShoulder(emissive, 0.65);
     finalCol += screenDither(gl_FragCoord.xy);
 
     gl_FragColor = vec4(finalCol, alpha * 0.82);
@@ -132,11 +132,11 @@ const TENTACLE_FRAG = /* glsl */ `
     // Fade delicately towards trailing tip
     float tipFade = smoothstep(1.0, 0.15, vProgress);
 
-    // Bioluminescent palette
+    // Bioluminescent palette: deep electric cyan (#14c8e8) and faint orchid violet (#b83ae0)
     float colorShift = sin(uTime * 0.6 + uPhase + vProgress * 3.0) * 0.5 + 0.5;
-    vec3 cyan = vec3(0.094, 0.91, 1.0);
-    vec3 magenta = vec3(0.851, 0.275, 0.937);
-    vec3 col = mix(cyan, magenta, colorShift);
+    vec3 cyan = vec3(0.078, 0.784, 0.910);
+    vec3 orchid = vec3(0.722, 0.227, 0.878);
+    vec3 col = mix(cyan, orchid, colorShift);
 
     float alpha = (fresnel * 0.65 + 0.25) * tipFade * 0.65;
     if (alpha < 0.005) discard;
@@ -273,8 +273,8 @@ export class AbyssalDriftScene implements ISpatialScene {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x01040b);
-    this.scene.fog = new THREE.FogExp2(0x01040b, 0.024);
+    this.scene.background = new THREE.Color(0x010309);
+    this.scene.fog = new THREE.FogExp2(0x010309, 0.024);
 
     this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 150);
     this.camera.position.set(0, 0, 8);

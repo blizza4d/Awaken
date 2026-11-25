@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
+import { GLSL_DITHER } from '../shaders/common';
 
 const BUILDING_COUNT = 820;
-const NEON_SIGN_COUNT = 260;
-const TRAFFIC_COUNT = 340;
-const RAIN_COUNT = 18_000;
-const SPLASH_COUNT = 1_400;
-const CITY_SPAN_Z = 420;
+const TRAFFIC_COUNT = 320;
+const RAIN_COUNT = 16_000;
+const SPLASH_COUNT = 1_200;
+const CITY_SPAN_Z = 440;
 
 interface BuildingRecord {
   x: number;
@@ -55,12 +55,11 @@ const RAIN_VERTEX_SHADER = /* glsl */ `
     // Stretch streak along velocity vector (rain + wind slant)
     vec3 velDir = normalize(vec3(uWind.x * 16.0, -(42.0 + aSpeed * 24.0), uWind.z * 16.0));
     float streakLen = 1.6 + aSpeed * 1.4;
-    // position.y is -0.5..0.5 along line quad
-    vec3 finalPos = worldPos + velDir * (position.y * streakLen) + vec3(position.x * 0.045, 0.0, 0.0);
+    vec3 finalPos = worldPos + velDir * (position.y * streakLen) + vec3(position.x * 0.04, 0.0, 0.0);
 
     float dist = length(rel);
-    // Faint depth-faded rain streaks (~18% opacity)
-    vAlpha = smoothstep(70.0, 10.0, dist) * 0.18 * (0.7 + 0.3 * sin(aPhase * 6.28318 + uTime * 3.0));
+    // Soft, low-opacity (~15%) depth-attenuated rain
+    vAlpha = smoothstep(72.0, 12.0, dist) * 0.15 * (0.75 + 0.25 * sin(aPhase * 6.28318 + uTime * 3.0));
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(finalPos, 1.0);
   }
@@ -72,12 +71,11 @@ const RAIN_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
 
   void main() {
-    // Soft anti-aliased profile along streak to eliminate square edges
     float x = abs(vUv.x - 0.5) * 2.0;
     float y = abs(vUv.y - 0.5) * 2.0;
     float profile = clamp((1.0 - x * x) * (1.0 - y * y * y * y), 0.0, 1.0);
     if (profile <= 0.01) discard;
-    gl_FragColor = vec4(uRainTint * 0.72, vAlpha * profile);
+    gl_FragColor = vec4(uRainTint * 0.65, vAlpha * profile);
   }
 `;
 
@@ -107,48 +105,37 @@ const SPLASH_FRAGMENT_SHADER = /* glsl */ `
   varying vec2 vUv;
   varying float vLife;
 
-  float screenDither(vec2 fc) {
-    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
-  }
+  ${GLSL_DITHER}
 
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
     float d = length(p);
     if (d > 1.0) discard;
-    // Crisp expanding circular water ripple ring with soft AA edges
-    float ring = smoothstep(0.09, 0.0, abs(d - vLife * 0.85));
-    float alpha = ring * (1.0 - vLife) * 0.72;
+    float ring = smoothstep(0.08, 0.0, abs(d - vLife * 0.85));
+    float alpha = ring * (1.0 - vLife) * 0.45;
     if (alpha < 0.01) discard;
-    vec3 col = mix(vec3(0.45, 0.92, 1.0), vec3(0.95, 0.45, 0.85), vLife);
+    vec3 col = mix(vec3(0.35, 0.65, 0.85), vec3(0.65, 0.75, 0.95), vLife);
     col += screenDither(gl_FragCoord.xy);
-    gl_FragColor = vec4(col * 1.4, alpha);
+    gl_FragColor = vec4(col * 0.85, alpha);
   }
 `;
 
 const BEACON_VERTEX_SHADER = /* glsl */ `
   attribute vec3 aBeaconPos;
   attribute float aBeaconPhase;
-  attribute float aIsAmber;
 
   uniform float uTime;
 
-  varying vec3 vColor;
   varying float vFlash;
 
   void main() {
-    // Sharp rhythmic aviation obstruction strobe flashing
-    float cycle = fract(uTime * 1.15 + aBeaconPhase);
-    float flash1 = smoothstep(0.0, 0.03, cycle) * smoothstep(0.14, 0.08, cycle);
-    float flash2 = smoothstep(0.20, 0.23, cycle) * smoothstep(0.34, 0.28, cycle);
-    float strobe = flash1 * 1.0 + flash2 * 0.75;
+    // Slow-blinking crimson aviation rooftop obstruction beacons
+    float cycle = fract(uTime * 0.65 + aBeaconPhase);
+    float flash = smoothstep(0.0, 0.04, cycle) * smoothstep(0.18, 0.09, cycle);
 
-    vFlash = 0.22 + strobe * 2.8;
-    vec3 red = vec3(1.0, 0.08, 0.08);
-    vec3 amber = vec3(1.0, 0.68, 0.12);
-    vColor = mix(red, amber, aIsAmber);
+    vFlash = 0.15 + flash * 2.2;
 
-    // Expand beacon silhouette slightly during strobe
-    vec3 localPos = position * (1.0 + strobe * 0.5);
+    vec3 localPos = position * (1.0 + flash * 0.4);
     vec3 worldPos = aBeaconPos + localPos;
 
     gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
@@ -156,46 +143,52 @@ const BEACON_VERTEX_SHADER = /* glsl */ `
 `;
 
 const BEACON_FRAGMENT_SHADER = /* glsl */ `
-  varying vec3 vColor;
   varying float vFlash;
 
   void main() {
-    gl_FragColor = vec4(vColor * vFlash, 1.0);
+    // Pure subdued crimson beacon glow (#ff1744)
+    vec3 red = vec3(0.95, 0.08, 0.18);
+    gl_FragColor = vec4(red * vFlash, 1.0);
   }
 `;
 
-const VOLUMETRIC_HAZE_VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
+// Thin vertical architectural LED light accent along building edges
+const ACCENT_STRIP_VERTEX_SHADER = /* glsl */ `
+  attribute vec3 aStripPos;
+  attribute vec3 aStripScale;
+  attribute float aStripHue; // 0 = warm tungsten, 1 = slate cyan
 
-const VOLUMETRIC_HAZE_FRAG = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uTime;
-  uniform float uSeed;
-  varying vec2 vUv;
+  varying vec3 vColor;
 
   void main() {
-    vec2 p = vUv * 2.0 - 1.0;
-    float radial = exp(-dot(p, p) * 2.4);
-    float shimmer = 0.82 + 0.18 * sin(uTime * 0.7 + uSeed * 6.2831 + vUv.y * 4.0);
-    // Subtle low-luminance atmospheric haze without washing out the canyon
-    float alpha = radial * 0.045 * shimmer;
-    gl_FragColor = vec4(uColor * 0.65, alpha);
+    vec3 local = position * aStripScale;
+    vec3 worldPos = aStripPos + local;
+
+    vec3 tungsten = vec3(0.851, 0.608, 0.322); // #d99b52
+    vec3 slateCyan = vec3(0.357, 0.659, 0.788); // #5ba8c9
+    vColor = mix(tungsten, slateCyan, aStripHue);
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(worldPos, 1.0);
   }
 `;
 
-function createProceduralBuildingTextures(): {
+const ACCENT_STRIP_FRAGMENT_SHADER = /* glsl */ `
+  varying vec3 vColor;
+
+  void main() {
+    // Restrained thin architectural accent glow
+    gl_FragColor = vec4(vColor * 1.15, 1.0);
+  }
+`;
+
+function createProceduralBrutalistTextures(): {
   albedoMap: THREE.CanvasTexture;
   roughnessMap: THREE.CanvasTexture;
   emissiveMap: THREE.CanvasTexture;
 } {
   const size = 512;
 
-  // 1. Albedo Brutalist Wet-Concrete & Smoked-Glass Panel Map (#04070e base)
+  // 1. Albedo: Brutalist dark wet-concrete & smoked-glass (#04070e)
   const albedoCanvas = document.createElement('canvas');
   albedoCanvas.width = size;
   albedoCanvas.height = size;
@@ -203,37 +196,37 @@ function createProceduralBuildingTextures(): {
   aCtx.fillStyle = '#04070e';
   aCtx.fillRect(0, 0, size, size);
 
-  // Architectural steel & smoked-glass facade mullions
-  for (let y = 0; y < size; y += 12) {
-    aCtx.fillStyle = y % 48 === 0 ? '#0b1424' : '#070c17';
+  // Facade architectural mullions
+  for (let y = 0; y < size; y += 16) {
+    aCtx.fillStyle = y % 64 === 0 ? '#0a1220' : '#060a14';
     aCtx.fillRect(0, y, size, 2);
   }
   for (let x = 0; x < size; x += 16) {
-    aCtx.fillStyle = '#080e1c';
+    aCtx.fillStyle = '#070c17';
     aCtx.fillRect(x, 0, 2, size);
   }
 
-  // 2. Rain Wetness Roughness Map (capped so surfaces retain texture rather than mirror glare)
+  // 2. Roughness: Wet concrete with runoff streaks (roughness floor >= 0.35)
   const roughCanvas = document.createElement('canvas');
   roughCanvas.width = size;
   roughCanvas.height = size;
   const rCtx = roughCanvas.getContext('2d')!;
-  rCtx.fillStyle = '#555555'; // Roughness floor >= 0.33
+  rCtx.fillStyle = '#5a5a5a'; // Baseline roughness 0.35
   rCtx.fillRect(0, 0, size, size);
 
-  // Vertical rain runoff channels with controlled gloss
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 80; i++) {
     const rx = Math.random() * size;
-    const rw = 2 + Math.random() * 8;
+    const rw = 2 + Math.random() * 6;
     const grad = rCtx.createLinearGradient(rx, 0, rx, size);
-    grad.addColorStop(0, 'rgba(42, 42, 42, 0.7)');
-    grad.addColorStop(0.5, 'rgba(56, 56, 56, 0.55)');
-    grad.addColorStop(1, 'rgba(38, 38, 38, 0.75)');
+    grad.addColorStop(0, 'rgba(48, 48, 48, 0.6)');
+    grad.addColorStop(0.5, 'rgba(60, 60, 60, 0.45)');
+    grad.addColorStop(1, 'rgba(72, 72, 72, 0.6)');
     rCtx.fillStyle = grad;
     rCtx.fillRect(rx, 0, rw, size);
   }
 
-  // 3. Recessed High-Frequency Micro-Window Grid (75%–85% dark, lit: warm tungsten #d99b52, muted slate-cyan #5ca8c9)
+  // 3. Emissive Recessed Micro-Windows:
+  // Strict rule: ~82% dark windows. Lit rooms glow in restrained warm tungsten (#d99b52) and cool slate-cyan (#5ba8c9)
   const emCanvas = document.createElement('canvas');
   emCanvas.width = size;
   emCanvas.height = size;
@@ -243,30 +236,19 @@ function createProceduralBuildingTextures(): {
 
   const windowPalette = [
     '#d99b52', // Restrained warm tungsten
-    '#5ca8c9', // Muted slate-cyan
-    '#c88448', // Warm amber apartment
-    '#4a90a4', // Deep cyan office
+    '#5ba8c9', // Cool slate-cyan
+    '#c88b48', // Deep amber
+    '#4a95a8', // Subdued teal-slate
   ];
 
-  const rows = 48;
-  const cols = 24;
+  const rows = 32;
+  const cols = 32;
   const cellW = size / cols;
   const cellH = size / rows;
 
   for (let r = 0; r < rows; r++) {
-    // Sparse thin architectural neon accent line on select floors
-    const isAccentLine = r % 16 === 0 && Math.random() > 0.65;
-    const accentCol = Math.random() > 0.5 ? '#38bdf8' : '#d99b52';
-
     for (let c = 0; c < cols; c++) {
-      if (isAccentLine) {
-        eCtx.fillStyle = accentCol;
-        eCtx.globalAlpha = 0.55;
-        eCtx.fillRect(c * cellW + 1, r * cellH + cellH * 0.5, cellW - 2, 1);
-        continue;
-      }
-
-      // 78% to 84% dark rooms
+      // 82% dark windows
       if (Math.random() < 0.18) {
         const col = windowPalette[Math.floor(Math.random() * windowPalette.length)];
         eCtx.fillStyle = col;
@@ -309,11 +291,10 @@ export class VolumetricMegacityScene implements ISpatialScene {
   private buildingsMesh: THREE.InstancedMesh | null = null;
   private spiresMesh: THREE.InstancedMesh | null = null;
   private beaconsMesh: THREE.InstancedMesh | null = null;
-  private neonSignsMesh: THREE.InstancedMesh | null = null;
+  private accentStripsMesh: THREE.InstancedMesh | null = null;
   private trafficMesh: THREE.InstancedMesh | null = null;
   private rainMesh: THREE.InstancedMesh | null = null;
   private splashMesh: THREE.InstancedMesh | null = null;
-  private hazePlanes: THREE.Mesh[] = [];
   private groundMesh: THREE.Mesh | null = null;
 
   private buildingData: BuildingRecord[] = [];
@@ -325,116 +306,90 @@ export class VolumetricMegacityScene implements ISpatialScene {
   private rainMaterial: THREE.ShaderMaterial | null = null;
   private splashMaterial: THREE.ShaderMaterial | null = null;
   private beaconMaterial: THREE.ShaderMaterial | null = null;
-  private droneLights: THREE.PointLight[] = [];
+  private accentMaterial: THREE.ShaderMaterial | null = null;
 
   private dummy = new THREE.Object3D();
   private smoothPointer = new THREE.Vector2();
   private qualityScale = 1.0;
-  private fogColorBase = new THREE.Color(0x060b1a);
-  private fogColorPulse = new THREE.Color(0x130824);
 
   constructor() {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x02040a);
-    // Volumetric exponential fog tuned to absorb neon light hues into deep midnight indigo
+    // Deep midnight-indigo height fog separating near, mid, and far megastructures
     this.scene.fog = new THREE.FogExp2(0x030610, 0.0092);
 
-    this.camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.5, 420);
-    this.camera.position.set(0, 42, 0);
+    this.camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 450);
+    this.camera.position.set(0, 52, 110);
   }
 
-  public init(_renderer: THREE.WebGLRenderer): void {
-    // 1. Restrained Lighting & Neon Atmospheric Beacons
-    const hemi = new THREE.HemisphereLight(0x182848, 0x060812, 0.32);
-    this.scene.add(hemi);
+  public init(renderer: THREE.WebGLRenderer): void {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = this.exposure;
 
-    const dirLight = new THREE.DirectionalLight(0x386088, 0.42);
-    dirLight.position.set(60, 120, 40);
-    this.scene.add(dirLight);
-
-    const cyanBeacon = new THREE.PointLight(0x00d8ea, 45, 110, 1.8);
-    const magentaBeacon = new THREE.PointLight(0xcc2268, 38, 110, 1.8);
-    const amberBeacon = new THREE.PointLight(0xd98825, 42, 100, 1.8);
-    this.droneLights.push(cyanBeacon, magentaBeacon, amberBeacon);
-    this.scene.add(cyanBeacon, magentaBeacon, amberBeacon);
-
-    // 2. Rain-Slick Street Surface (Dark PBR with subtle muted glints)
-    const { albedoMap, roughnessMap, emissiveMap } = createProceduralBuildingTextures();
+    // 1. Procedural Building Facade Textures
+    const { albedoMap, roughnessMap, emissiveMap } = createProceduralBrutalistTextures();
     this.disposableTextures.push(albedoMap, roughnessMap, emissiveMap);
 
-    const groundGeo = new THREE.PlaneGeometry(520, 520);
-    const groundMat = new THREE.MeshStandardMaterial({
-      color: 0x03050b,
-      roughness: 0.32,
-      metalness: 0.42,
-    });
-    this.disposableGeometries.push(groundGeo);
-    this.disposableMaterials.push(groundMat);
-
-    this.groundMesh = new THREE.Mesh(groundGeo, groundMat);
-    this.groundMesh.rotation.x = -Math.PI / 2;
-    this.groundMesh.position.y = 0;
-    this.scene.add(this.groundMesh);
-
-    // 3. Instanced Procedural Skyscrapers with Wet PBR Specular + Emissive Windows
+    // 2. Instanced Brutalist Towers
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-    boxGeo.translate(0, 0.5, 0); // Anchor at ground y=0
+    boxGeo.translate(0, 0.5, 0); // Pivot at bottom
     this.disposableGeometries.push(boxGeo);
 
     const buildingMat = new THREE.MeshStandardMaterial({
       map: albedoMap,
-      roughnessMap: roughnessMap,
+      roughnessMap,
       roughness: 0.42,
-      metalness: 0.45,
+      metalness: 0.78,
       emissive: new THREE.Color(0xffffff),
-      emissiveMap: emissiveMap,
-      emissiveIntensity: 0.85,
+      emissiveMap,
+      emissiveIntensity: 0.65,
     });
     this.disposableMaterials.push(buildingMat);
 
     this.buildingsMesh = new THREE.InstancedMesh(boxGeo, buildingMat, BUILDING_COUNT);
-    const color = new THREE.Color();
+    this.buildingsMesh.castShadow = false;
+    this.buildingsMesh.receiveShadow = false;
+
+    // Procedural Canyon Layout: wide central flight corridor (X between -16 and +16)
+    const spireBuildings: BuildingRecord[] = [];
+    let count = 0;
 
     for (let i = 0; i < BUILDING_COUNT; i++) {
-      // Leave a dramatic central drone flight canyon (|x| > 16)
-      const side = i % 2 === 0 ? 1 : -1;
-      const laneOffset = 17 + Math.pow(Math.random(), 1.35) * 145;
-      const x = side * laneOffset;
+      const isWest = i % 2 === 0;
+      const xDist = 18 + Math.random() * 88;
+      const x = isWest ? -xDist : xDist;
       const z = (Math.random() - 0.5) * CITY_SPAN_Z;
 
-      const width = 8 + Math.random() * 14;
-      const depth = 8 + Math.random() * 14;
-      // Taller monumental megastructures flanking the central corridor
-      const canyonFactor = Math.max(0.25, 1.0 - laneOffset / 165);
-      const height = 24 + Math.random() * 98 * (0.45 + canyonFactor * 0.85);
+      const width = 12 + Math.random() * 24;
+      const depth = 12 + Math.random() * 24;
+      const height = 35 + Math.random() * 115;
+      const hasSpire = height > 95 && Math.random() > 0.45;
 
-      this.buildingData.push({ x, z, width, depth, height, hasSpire: height > 75 });
+      const record: BuildingRecord = { x, z, width, depth, height, hasSpire };
+      this.buildingData.push(record);
+
+      if (hasSpire) spireBuildings.push(record);
 
       this.dummy.position.set(x, 0, z);
       this.dummy.scale.set(width, height, depth);
-      this.dummy.rotation.set(0, 0, 0);
+      this.dummy.rotation.set(0, (Math.floor(Math.random() * 4) * Math.PI) / 2, 0);
       this.dummy.updateMatrix();
-      this.buildingsMesh.setMatrixAt(i, this.dummy.matrix);
 
-      // Subtle architectural tint variation
-      color.setHSL(0.58 + Math.random() * 0.14, 0.25, 0.62 + Math.random() * 0.38);
-      this.buildingsMesh.setColorAt(i, color);
+      this.buildingsMesh.setMatrixAt(count++, this.dummy.matrix);
     }
+
     this.buildingsMesh.instanceMatrix.needsUpdate = true;
-    if (this.buildingsMesh.instanceColor) this.buildingsMesh.instanceColor.needsUpdate = true;
     this.scene.add(this.buildingsMesh);
 
-    // 3b. Rooftop Spires with Blinking Aviation Obstruction Beacons for Monumental Megastructures
-    const spireBuildings = this.buildingData.filter((b) => b.hasSpire);
+    // 3. Rooftop Spires and Crimson Obstruction Beacons
     const spireCount = spireBuildings.length;
-
     if (spireCount > 0) {
       const spireGeo = new THREE.CylinderGeometry(0.12, 0.75, 1, 6);
-      spireGeo.translate(0, 0.5, 0); // Anchor at base
+      spireGeo.translate(0, 0.5, 0);
       this.disposableGeometries.push(spireGeo);
 
       const spireMat = new THREE.MeshStandardMaterial({
-        color: 0x161d2d,
+        color: 0x141a26,
         roughness: 0.35,
         metalness: 0.85,
       });
@@ -447,7 +402,6 @@ export class VolumetricMegacityScene implements ISpatialScene {
 
       const beaconPositions = new Float32Array(spireCount * 3);
       const beaconPhases = new Float32Array(spireCount);
-      const isAmberAttrs = new Float32Array(spireCount);
 
       for (let i = 0; i < spireCount; i++) {
         const b = spireBuildings[i];
@@ -463,7 +417,6 @@ export class VolumetricMegacityScene implements ISpatialScene {
         beaconPositions[i * 3 + 1] = b.height + spireH + 0.25;
         beaconPositions[i * 3 + 2] = b.z;
         beaconPhases[i] = Math.random();
-        isAmberAttrs[i] = i % 3 === 0 ? 1.0 : 0.0; // 33% amber, 67% aviation red
       }
 
       this.spiresMesh.instanceMatrix.needsUpdate = true;
@@ -471,14 +424,11 @@ export class VolumetricMegacityScene implements ISpatialScene {
 
       beaconGeo.setAttribute('aBeaconPos', new THREE.InstancedBufferAttribute(beaconPositions, 3));
       beaconGeo.setAttribute('aBeaconPhase', new THREE.InstancedBufferAttribute(beaconPhases, 1));
-      beaconGeo.setAttribute('aIsAmber', new THREE.InstancedBufferAttribute(isAmberAttrs, 1));
 
       this.beaconMaterial = new THREE.ShaderMaterial({
         vertexShader: BEACON_VERTEX_SHADER,
         fragmentShader: BEACON_FRAGMENT_SHADER,
-        uniforms: {
-          uTime: { value: 0 },
-        },
+        uniforms: { uTime: { value: 0 } },
         transparent: false,
         toneMapped: false,
       });
@@ -494,119 +444,124 @@ export class VolumetricMegacityScene implements ISpatialScene {
       this.scene.add(this.beaconsMesh);
     }
 
-    // 4. Instanced Glowing Neon Billboards & Rooftop Trim Bands
-    const signGeo = new THREE.BoxGeometry(1, 1, 0.35);
-    const signMat = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
+    // 4. Sparse Thin Vertical Architectural Light Accents along Building Corners
+    const accentCount = 180;
+    const accentGeo = new THREE.BoxGeometry(0.25, 1.0, 0.25);
+    this.disposableGeometries.push(accentGeo);
+
+    const stripPos = new Float32Array(accentCount * 3);
+    const stripScale = new Float32Array(accentCount * 3);
+    const stripHue = new Float32Array(accentCount);
+
+    for (let i = 0; i < accentCount; i++) {
+      const b = this.buildingData[i % this.buildingData.length];
+      const cornerX = b.x + (Math.random() > 0.5 ? 1 : -1) * (b.width * 0.5);
+      const cornerZ = b.z + (Math.random() > 0.5 ? 1 : -1) * (b.depth * 0.5);
+      const stripH = 15 + Math.random() * 45;
+      const stripBaseY = Math.max(10, b.height * (0.2 + Math.random() * 0.5));
+
+      stripPos[i * 3 + 0] = cornerX;
+      stripPos[i * 3 + 1] = stripBaseY + stripH * 0.5;
+      stripPos[i * 3 + 2] = cornerZ;
+
+      stripScale[i * 3 + 0] = 1.0;
+      stripScale[i * 3 + 1] = stripH;
+      stripScale[i * 3 + 2] = 1.0;
+
+      stripHue[i] = Math.random() > 0.5 ? 1.0 : 0.0; // 50% slate cyan, 50% warm tungsten
+    }
+
+    accentGeo.setAttribute('aStripPos', new THREE.InstancedBufferAttribute(stripPos, 3));
+    accentGeo.setAttribute('aStripScale', new THREE.InstancedBufferAttribute(stripScale, 3));
+    accentGeo.setAttribute('aStripHue', new THREE.InstancedBufferAttribute(stripHue, 1));
+
+    this.accentMaterial = new THREE.ShaderMaterial({
+      vertexShader: ACCENT_STRIP_VERTEX_SHADER,
+      fragmentShader: ACCENT_STRIP_FRAGMENT_SHADER,
+      transparent: false,
       toneMapped: true,
     });
-    this.disposableGeometries.push(signGeo);
-    this.disposableMaterials.push(signMat);
+    this.disposableMaterials.push(this.accentMaterial);
 
-    this.neonSignsMesh = new THREE.InstancedMesh(signGeo, signMat, NEON_SIGN_COUNT);
-    const neonColors = [
-      new THREE.Color(0x00c4d8).multiplyScalar(1.05),
-      new THREE.Color(0xd92672).multiplyScalar(1.05),
-      new THREE.Color(0x8a45cf).multiplyScalar(0.95),
-      new THREE.Color(0xd98218).multiplyScalar(0.95),
-    ];
-
-    for (let i = 0; i < NEON_SIGN_COUNT; i++) {
-      const b = this.buildingData[i % this.buildingData.length];
-      const inwardSign = b.x > 0 ? -1 : 1;
-      const sx = b.x + inwardSign * (b.width * 0.5 + 0.4);
-      const sy = Math.max(14, b.height * (0.45 + Math.random() * 0.5));
-      const verticalBanner = Math.random() > 0.45;
-
-      this.dummy.position.set(sx, sy, b.z);
-      this.dummy.rotation.set(0, Math.PI / 2, 0);
-      this.dummy.scale.set(
-        verticalBanner ? 1.6 : b.depth * 0.65,
-        verticalBanner ? 12 + Math.random() * 16 : 2.0 + Math.random() * 2.2,
-        1
-      );
-      this.dummy.updateMatrix();
-      this.neonSignsMesh.setMatrixAt(i, this.dummy.matrix);
-      this.neonSignsMesh.setColorAt(i, neonColors[i % neonColors.length]);
+    this.accentStripsMesh = new THREE.InstancedMesh(accentGeo, this.accentMaterial, accentCount);
+    this.accentStripsMesh.frustumCulled = false;
+    const idMat = new THREE.Matrix4();
+    for (let i = 0; i < accentCount; i++) {
+      this.accentStripsMesh.setMatrixAt(i, idMat);
     }
-    this.neonSignsMesh.instanceMatrix.needsUpdate = true;
-    if (this.neonSignsMesh.instanceColor) this.neonSignsMesh.instanceColor.needsUpdate = true;
-    this.scene.add(this.neonSignsMesh);
+    this.accentStripsMesh.instanceMatrix.needsUpdate = true;
+    this.scene.add(this.accentStripsMesh);
 
-    // 5. Instanced Aerial Drone Spinner Traffic Lanes (restrained speed and muted tail/headlights)
-    const trafficGeo = new THREE.BoxGeometry(0.45, 0.25, 1);
+    // 5. Subtle Distant Flying Headlight & Taillight Streaks
+    const trafficGeo = new THREE.BoxGeometry(0.35, 0.18, 1);
     const trafficMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: true });
     this.disposableGeometries.push(trafficGeo);
     this.disposableMaterials.push(trafficMat);
 
     this.trafficMesh = new THREE.InstancedMesh(trafficGeo, trafficMat, TRAFFIC_COUNT);
-    const cyanCar = new THREE.Color(0x38a0b8).multiplyScalar(1.2);
-    const redCar = new THREE.Color(0xa62020).multiplyScalar(1.2);
+    const cyanTraffic = new THREE.Color(0x5ba8c9).multiplyScalar(1.1);
+    const redTraffic = new THREE.Color(0xb91c1c).multiplyScalar(1.1);
 
     for (let i = 0; i < TRAFFIC_COUNT; i++) {
       const isCyan = i % 2 === 0;
-      const laneX = (isCyan ? -1 : 1) * (3 + Math.random() * 11);
-      const laneY = 14 + Math.random() * 68;
+      const laneX = (isCyan ? -1 : 1) * (4 + Math.random() * 12);
+      const laneY = 16 + Math.random() * 70;
       const laneZ = (Math.random() - 0.5) * CITY_SPAN_Z;
-      const speed = (isCyan ? -1 : 1) * (24 + Math.random() * 32);
-      const length = 2.8 + Math.random() * 5.2;
+      const speed = (isCyan ? -1 : 1) * (22 + Math.random() * 30);
+      const length = 2.4 + Math.random() * 4.6;
 
       this.trafficData.push({ x: laneX, y: laneY, z: laneZ, speed, length, isCyan });
-      this.trafficMesh.setColorAt(i, isCyan ? cyanCar : redCar);
+      this.trafficMesh.setColorAt(i, isCyan ? cyanTraffic : redTraffic);
     }
     if (this.trafficMesh.instanceColor) this.trafficMesh.instanceColor.needsUpdate = true;
     this.scene.add(this.trafficMesh);
 
-    // 6. Volumetric Colored Atmospheric Neon Haze Shafts
-    const hazeGeo = new THREE.PlaneGeometry(68, 68);
-    this.disposableGeometries.push(hazeGeo);
-    const hazePalette = [0x00e5ff, 0xff2a85, 0x7c3aed, 0xff9f1c];
+    // 6. Ground Asphalt Bed
+    const groundGeo = new THREE.PlaneGeometry(350, CITY_SPAN_Z);
+    groundGeo.rotateX(-Math.PI / 2);
+    this.disposableGeometries.push(groundGeo);
 
-    for (let i = 0; i < 14; i++) {
-      const hMat = new THREE.ShaderMaterial({
-        vertexShader: VOLUMETRIC_HAZE_VERT,
-        fragmentShader: VOLUMETRIC_HAZE_FRAG,
-        uniforms: {
-          uColor: { value: new THREE.Color(hazePalette[i % hazePalette.length]) },
-          uTime: { value: 0 },
-          uSeed: { value: Math.random() },
-        },
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide,
-      });
-      this.disposableMaterials.push(hMat);
+    const groundMat = new THREE.MeshStandardMaterial({
+      color: 0x02050b,
+      roughness: 0.38,
+      metalness: 0.88,
+    });
+    this.disposableMaterials.push(groundMat);
 
-      const plane = new THREE.Mesh(hazeGeo, hMat);
-      plane.position.set(
-        (i % 2 === 0 ? -1 : 1) * (12 + Math.random() * 28),
-        22 + Math.random() * 44,
-        -20 - i * 24
-      );
-      this.hazePlanes.push(plane);
-      this.scene.add(plane);
-    }
+    this.groundMesh = new THREE.Mesh(groundGeo, groundMat);
+    this.groundMesh.position.y = -0.5;
+    this.scene.add(this.groundMesh);
 
-    // 7. Wind-Driven Slanted Rain Sheet Particle System (Custom GLSL)
-    const rainQuad = new THREE.PlaneGeometry(1, 1);
-    this.disposableGeometries.push(rainQuad);
+    // 7. Ambient Lighting (Moody, dark-room calibrated)
+    const ambientLight = new THREE.AmbientLight(0x0a1428, 0.45);
+    const moonDirLight = new THREE.DirectionalLight(0x386090, 0.65);
+    moonDirLight.position.set(-45, 90, 45);
+    this.scene.add(ambientLight, moonDirLight);
 
-    const rainOffsets = new Float32Array(RAIN_COUNT * 3);
-    const rainSpeeds = new Float32Array(RAIN_COUNT);
-    const rainPhases = new Float32Array(RAIN_COUNT);
+    // 8. Soft Depth-Attenuated Rain & Rooftop Splashes
+    this.buildRainSystem();
+    this.buildSplashSystem();
+  }
+
+  private buildRainSystem(): void {
+    const quadGeo = new THREE.PlaneGeometry(0.045, 1.0);
+    this.disposableGeometries.push(quadGeo);
+
+    const offsets = new Float32Array(RAIN_COUNT * 3);
+    const speeds = new Float32Array(RAIN_COUNT);
+    const phases = new Float32Array(RAIN_COUNT);
 
     for (let i = 0; i < RAIN_COUNT; i++) {
-      rainOffsets[i * 3 + 0] = (Math.random() - 0.5) * 110;
-      rainOffsets[i * 3 + 1] = Math.random() * 95;
-      rainOffsets[i * 3 + 2] = (Math.random() - 0.5) * 140;
-      rainSpeeds[i] = Math.random();
-      rainPhases[i] = Math.random();
+      offsets[i * 3 + 0] = (Math.random() - 0.5) * 110;
+      offsets[i * 3 + 1] = (Math.random() - 0.5) * 95;
+      offsets[i * 3 + 2] = (Math.random() - 0.5) * 140;
+      speeds[i] = Math.random();
+      phases[i] = Math.random();
     }
 
-    rainQuad.setAttribute('aOffset', new THREE.InstancedBufferAttribute(rainOffsets, 3));
-    rainQuad.setAttribute('aSpeed', new THREE.InstancedBufferAttribute(rainSpeeds, 1));
-    rainQuad.setAttribute('aPhase', new THREE.InstancedBufferAttribute(rainPhases, 1));
+    quadGeo.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets, 3));
+    quadGeo.setAttribute('aSpeed', new THREE.InstancedBufferAttribute(speeds, 1));
+    quadGeo.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phases, 1));
 
     this.rainMaterial = new THREE.ShaderMaterial({
       vertexShader: RAIN_VERTEX_SHADER,
@@ -614,58 +569,49 @@ export class VolumetricMegacityScene implements ISpatialScene {
       uniforms: {
         uTime: { value: 0 },
         uCamPos: { value: new THREE.Vector3() },
-        uWind: { value: new THREE.Vector3(0.35, 0, -0.15) },
-        uRainTint: { value: new THREE.Color(0x9be7ff) },
+        uWind: { value: new THREE.Vector3(-0.35, 0, -0.15) },
+        uRainTint: { value: new THREE.Color(0x6088a8) },
       },
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      blending: THREE.NormalBlending,
       side: THREE.DoubleSide,
     });
     this.disposableMaterials.push(this.rainMaterial);
 
-    this.rainMesh = new THREE.InstancedMesh(rainQuad, this.rainMaterial, RAIN_COUNT);
+    this.rainMesh = new THREE.InstancedMesh(quadGeo, this.rainMaterial, RAIN_COUNT);
     this.rainMesh.frustumCulled = false;
-    const identity = new THREE.Matrix4();
+    const identityMat = new THREE.Matrix4();
     for (let i = 0; i < RAIN_COUNT; i++) {
-      this.rainMesh.setMatrixAt(i, identity);
+      this.rainMesh.setMatrixAt(i, identityMat);
     }
     this.rainMesh.instanceMatrix.needsUpdate = true;
     this.scene.add(this.rainMesh);
+  }
 
-    // 8. Rooftop & Street Horizontal Surface Splash Sprites
-    const splashGeo = new THREE.PlaneGeometry(1, 1);
-    splashGeo.rotateX(-Math.PI / 2);
-    this.disposableGeometries.push(splashGeo);
+  private buildSplashSystem(): void {
+    const splashQuadGeo = new THREE.PlaneGeometry(1, 1);
+    splashQuadGeo.rotateX(-Math.PI / 2);
+    this.disposableGeometries.push(splashQuadGeo);
 
-    const splashPositions = new Float32Array(SPLASH_COUNT * 3);
-    const splashSeeds = new Float32Array(SPLASH_COUNT);
+    const positions = new Float32Array(SPLASH_COUNT * 3);
+    const seeds = new Float32Array(SPLASH_COUNT);
 
     for (let i = 0; i < SPLASH_COUNT; i++) {
-      if (i < SPLASH_COUNT * 0.72) {
-        // Trigger splashes directly on horizontal skyscraper rooftops
-        const b = this.buildingData[i % this.buildingData.length];
-        splashPositions[i * 3 + 0] = b.x + (Math.random() - 0.5) * b.width * 0.85;
-        splashPositions[i * 3 + 1] = b.height + 0.08;
-        splashPositions[i * 3 + 2] = b.z + (Math.random() - 0.5) * b.depth * 0.85;
-      } else {
-        // Trigger splashes along central wet street corridor
-        splashPositions[i * 3 + 0] = (Math.random() - 0.5) * 32;
-        splashPositions[i * 3 + 1] = 0.08;
-        splashPositions[i * 3 + 2] = (Math.random() - 0.5) * CITY_SPAN_Z;
-      }
-      splashSeeds[i] = Math.random();
+      const b = this.buildingData[i % this.buildingData.length];
+      positions[i * 3 + 0] = b.x + (Math.random() - 0.5) * b.width * 0.85;
+      positions[i * 3 + 1] = b.height + 0.08;
+      positions[i * 3 + 2] = b.z + (Math.random() - 0.5) * b.depth * 0.85;
+      seeds[i] = Math.random();
     }
 
-    splashGeo.setAttribute('aSplashPos', new THREE.InstancedBufferAttribute(splashPositions, 3));
-    splashGeo.setAttribute('aSplashSeed', new THREE.InstancedBufferAttribute(splashSeeds, 1));
+    splashQuadGeo.setAttribute('aSplashPos', new THREE.InstancedBufferAttribute(positions, 3));
+    splashQuadGeo.setAttribute('aSplashSeed', new THREE.InstancedBufferAttribute(seeds, 1));
 
     this.splashMaterial = new THREE.ShaderMaterial({
       vertexShader: SPLASH_VERTEX_SHADER,
       fragmentShader: SPLASH_FRAGMENT_SHADER,
-      uniforms: {
-        uTime: { value: 0 },
-      },
+      uniforms: { uTime: { value: 0 } },
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -673,107 +619,53 @@ export class VolumetricMegacityScene implements ISpatialScene {
     });
     this.disposableMaterials.push(this.splashMaterial);
 
-    this.splashMesh = new THREE.InstancedMesh(splashGeo, this.splashMaterial, SPLASH_COUNT);
+    this.splashMesh = new THREE.InstancedMesh(splashQuadGeo, this.splashMaterial, SPLASH_COUNT);
     this.splashMesh.frustumCulled = false;
+    const identityMat = new THREE.Matrix4();
     for (let i = 0; i < SPLASH_COUNT; i++) {
-      this.splashMesh.setMatrixAt(i, identity);
+      this.splashMesh.setMatrixAt(i, identityMat);
     }
     this.splashMesh.instanceMatrix.needsUpdate = true;
     this.scene.add(this.splashMesh);
   }
 
   public update(delta: number, elapsed: number, pointer: THREE.Vector2): void {
-    this.smoothPointer.lerp(pointer, Math.min(1, delta * 3.0));
+    this.smoothPointer.lerp(pointer, Math.min(1, delta * 2.0));
 
-    // Smooth high-altitude autonomous drone cruise down the neon canyon with organic multi-harmonic flight drift
-    const droneZ = -((elapsed * 16.5) % (CITY_SPAN_Z * 0.5));
-    const swayX =
-      Math.sin(elapsed * 0.24) * 5.2 +
-      Math.sin(elapsed * 0.53 + 1.1) * 1.8 +
-      this.smoothPointer.x * 6.0;
-    const altY =
-      44 +
-      Math.sin(elapsed * 0.35) * 6.5 +
-      Math.cos(elapsed * 0.17 + 2.3) * 2.2 +
-      this.smoothPointer.y * 5.0;
+    // Moody autonomous drone descent through the canyon
+    const flightSpeed = 10.5;
+    const camZ = ((elapsed * flightSpeed) % CITY_SPAN_Z) - CITY_SPAN_Z * 0.5;
+    const camY = 48 + Math.sin(elapsed * 0.12) * 8.5 + this.smoothPointer.y * 6.0;
+    const camX = Math.sin(elapsed * 0.08) * 5.5 + this.smoothPointer.x * 8.0;
 
-    this.camera.position.set(swayX, altY, droneZ + 80);
-    this.camera.lookAt(
-      swayX * 0.45 + Math.sin(elapsed * 0.18) * 3.5 + Math.cos(elapsed * 0.08) * 1.5,
-      altY - 6.5 + Math.sin(elapsed * 0.12) * 1.2,
-      droneZ - 45
-    );
-    // Subtle drone banking roll into turns with atmospheric micro-tremor
-    this.camera.rotation.z +=
-      -Math.cos(elapsed * 0.24) * 0.055 +
-      Math.sin(elapsed * 0.61) * 0.008 -
-      this.smoothPointer.x * 0.06;
+    this.camera.position.set(camX, camY, camZ);
+    this.camera.lookAt(camX * 0.35, camY - 7.5, camZ - 55);
 
-    // Move ground & neon fog beacons smoothly with the drone
-    if (this.groundMesh) {
-      this.groundMesh.position.z = this.camera.position.z - 80;
-    }
-
-    if (this.droneLights.length >= 3) {
-      this.droneLights[0].position.set(swayX - 24, altY - 8, this.camera.position.z - 45);
-      this.droneLights[1].position.set(swayX + 26, altY + 4, this.camera.position.z - 75);
-      this.droneLights[2].position.set(swayX, altY - 22, this.camera.position.z - 110);
-    }
-
-    // Subtly shift exponential fog absorption color as drone passes neon districts
-    if (this.scene.fog instanceof THREE.FogExp2) {
-      const neonShift = 0.5 + 0.5 * Math.sin(elapsed * 0.22);
-      this.scene.fog.color.copy(this.fogColorBase).lerp(this.fogColorPulse, neonShift * 0.6);
-    }
-
-    // Update volumetric haze planes
-    for (const plane of this.hazePlanes) {
-      const mat = plane.material as THREE.ShaderMaterial;
-      mat.uniforms.uTime.value = elapsed;
-      plane.lookAt(this.camera.position);
-      if (plane.position.z > this.camera.position.z + 30) {
-        plane.position.z -= 336;
-      } else if (plane.position.z < this.camera.position.z - 310) {
-        plane.position.z += 336;
-      }
-    }
-
-    // Update aerial drone traffic lanes
+    // Update traffic
     if (this.trafficMesh) {
-      const halfSpan = CITY_SPAN_Z * 0.5;
-      for (let i = 0; i < this.trafficData.length; i++) {
+      for (let i = 0; i < TRAFFIC_COUNT; i++) {
         const car = this.trafficData[i];
         car.z += car.speed * delta;
-        if (car.z > halfSpan) car.z = -halfSpan;
-        if (car.z < -halfSpan) car.z = halfSpan;
+        if (car.z > CITY_SPAN_Z * 0.5) car.z -= CITY_SPAN_Z;
+        if (car.z < -CITY_SPAN_Z * 0.5) car.z += CITY_SPAN_Z;
 
         this.dummy.position.set(car.x, car.y, car.z);
-        this.dummy.rotation.set(0, 0, 0);
         this.dummy.scale.set(1, 1, car.length);
+        this.dummy.rotation.set(0, 0, 0);
         this.dummy.updateMatrix();
         this.trafficMesh.setMatrixAt(i, this.dummy.matrix);
       }
       this.trafficMesh.instanceMatrix.needsUpdate = true;
     }
 
-    // Update wind-driven rain sheet shader
+    // Update shaders
     if (this.rainMaterial) {
       this.rainMaterial.uniforms.uTime.value = elapsed;
       this.rainMaterial.uniforms.uCamPos.value.copy(this.camera.position);
-      // Gusting atmospheric wind vector
-      this.rainMaterial.uniforms.uWind.value.set(
-        0.35 + Math.sin(elapsed * 0.4) * 0.28,
-        0,
-        -0.18 + Math.cos(elapsed * 0.3) * 0.14
-      );
     }
-
-    // Update rooftop & street splash ripples
     if (this.splashMaterial) {
       this.splashMaterial.uniforms.uTime.value = elapsed;
     }
-
-    // Update aviation obstruction beacon flashes
     if (this.beaconMaterial) {
       this.beaconMaterial.uniforms.uTime.value = elapsed;
     }
@@ -785,70 +677,36 @@ export class VolumetricMegacityScene implements ISpatialScene {
   }
 
   public setQuality(scale: number): void {
-    this.qualityScale = Math.max(0.35, Math.min(1.0, scale));
+    this.qualityScale = Math.max(0.4, Math.min(1.0, scale));
     if (this.rainMesh) {
       this.rainMesh.count = Math.floor(RAIN_COUNT * this.qualityScale);
-    }
-    if (this.splashMesh) {
-      this.splashMesh.count = Math.floor(SPLASH_COUNT * this.qualityScale);
+      this.rainMesh.instanceMatrix.needsUpdate = true;
     }
   }
 
   public getActiveInstanceCount(): number {
-    return (
-      BUILDING_COUNT +
-      (this.spiresMesh?.count ?? 0) +
-      (this.beaconsMesh?.count ?? 0) +
-      NEON_SIGN_COUNT +
-      TRAFFIC_COUNT +
-      Math.floor((RAIN_COUNT + SPLASH_COUNT) * this.qualityScale)
-    );
+    return BUILDING_COUNT + TRAFFIC_COUNT + RAIN_COUNT;
   }
 
   public dispose(): void {
-    [
-      this.buildingsMesh,
-      this.spiresMesh,
-      this.beaconsMesh,
-      this.neonSignsMesh,
-      this.trafficMesh,
-      this.rainMesh,
-      this.splashMesh,
-    ].forEach((m) => {
-      if (m) {
-        this.scene.remove(m);
-        m.dispose();
-      }
-    });
+    if (this.buildingsMesh) this.scene.remove(this.buildingsMesh);
+    if (this.spiresMesh) this.scene.remove(this.spiresMesh);
+    if (this.beaconsMesh) this.scene.remove(this.beaconsMesh);
+    if (this.accentStripsMesh) this.scene.remove(this.accentStripsMesh);
+    if (this.trafficMesh) this.scene.remove(this.trafficMesh);
+    if (this.rainMesh) this.scene.remove(this.rainMesh);
+    if (this.splashMesh) this.scene.remove(this.splashMesh);
+    if (this.groundMesh) this.scene.remove(this.groundMesh);
 
-    this.hazePlanes.forEach((p) => this.scene.remove(p));
-    this.hazePlanes = [];
+    for (const tex of this.disposableTextures) tex.dispose();
+    for (const geo of this.disposableGeometries) geo.dispose();
+    for (const mat of this.disposableMaterials) mat.dispose();
 
-    if (this.groundMesh) {
-      this.scene.remove(this.groundMesh);
-      this.groundMesh = null;
-    }
-
-    this.disposableGeometries.forEach((g) => g.dispose());
-    this.disposableMaterials.forEach((m) => m.dispose());
-    this.disposableTextures.forEach((t) => t.dispose());
-
+    this.disposableTextures = [];
     this.disposableGeometries = [];
     this.disposableMaterials = [];
-    this.disposableTextures = [];
     this.buildingData = [];
     this.trafficData = [];
-    this.droneLights = [];
-    this.buildingsMesh = null;
-    this.spiresMesh = null;
-    this.beaconsMesh = null;
-    this.neonSignsMesh = null;
-    this.trafficMesh = null;
-    this.rainMesh = null;
-    this.splashMesh = null;
-    this.rainMaterial = null;
-    this.splashMaterial = null;
-    this.beaconMaterial = null;
 
     this.scene.clear();
   }

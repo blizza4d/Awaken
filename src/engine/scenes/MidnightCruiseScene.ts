@@ -1,235 +1,380 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
+import { GLSL_DITHER, GLSL_HASH, GLSL_TONEMAP_SHOULDER } from '../shaders/common';
 
-const ROAD_WIDTH = 18;
-const ROAD_LENGTH = 240;
-const STREETLIGHT_COUNT = 14;
-const GUARDRAIL_POST_COUNT = 48;
-const TREE_COUNT = 36;
-const SKYLINE_BUILDING_COUNT = 45;
-
-// Custom Wet Highway Asphalt Shader with dynamic streetlight reflections
-const WET_ROAD_VERT = /* glsl */ `
+const CRUISE_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
-  varying vec3 vWorldPos;
-
   void main() {
     vUv = uv;
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
-    vWorldPos = worldPos.xyz;
-    gl_Position = projectionMatrix * viewMatrix * worldPos;
+    gl_Position = vec4(position.xy, 0.9999, 1.0);
   }
 `;
 
-const WET_ROAD_FRAG = /* glsl */ `
+const CRUISE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uTime;
-  uniform vec3 uCarPos;
-  uniform vec3 uLightPos[6];
-  uniform vec3 uLightColor[6];
-
-  varying vec2 vUv;
-  varying vec3 vWorldPos;
-
-  // Simple hash noise for asphalt micro-texture
-  float hash(vec2 p) {
-    p = fract(p * vec2(234.34, 435.345));
-    p += dot(p, p + 34.23);
-    return fract(p.x * p.y);
-  }
-
-  void main() {
-    // Scrolling road coordinates
-    vec2 roadCoord = vec2(vWorldPos.x + uTime * 28.0, vWorldPos.z);
-
-    // Asphalt dark base color with multi-frequency aggregate grain
-    float grain = (hash(floor(roadCoord * 28.0)) * 0.5 + hash(floor(roadCoord * 56.0)) * 0.5) * 0.045;
-    vec3 asphalt = vec3(0.024 + grain, 0.026 + grain, 0.032 + grain);
-
-    // Highway painted dashed center lane lines (Z = 0) and solid edge lines (Z = -5.5, +5.5)
-    float centerDash = step(0.45, fract(roadCoord.x * 0.07)) * smoothstep(0.18, 0.08, abs(vWorldPos.z));
-    float edgeLine1 = smoothstep(0.16, 0.06, abs(vWorldPos.z - 5.5));
-    float edgeLine2 = smoothstep(0.16, 0.06, abs(vWorldPos.z + 5.5));
-    float lines = clamp(centerDash * 0.72 + edgeLine1 * 0.65 + edgeLine2 * 0.65, 0.0, 1.0);
-
-    vec3 roadColor = mix(asphalt, vec3(0.58, 0.60, 0.64), lines);
-
-    // Restrained realistic wet dark-asphalt reflections with roughness modulation (never mirror-white glare)
-    vec3 lightAccum = vec3(0.0);
-    for (int i = 0; i < 6; i++) {
-      vec3 lightPos = uLightPos[i];
-      vec3 toLight = lightPos - vWorldPos;
-      float dist2 = dot(toLight, toLight);
-      float atten = 1.0 / (1.0 + dist2 * 0.055);
-
-      // Anisotropic specular streak modulated by wet asphalt roughness (>= 0.22) & grain
-      float roughnessBreakup = 0.65 + 0.35 * sin(roadCoord.x * 4.2 + grain * 14.0);
-      float spec = exp(-abs(vWorldPos.z - lightPos.z) * 2.4) * exp(-abs(vWorldPos.x - lightPos.x) * 0.38) * roughnessBreakup;
-      lightAccum += uLightColor[i] * (atten * 0.24 + spec * 0.36);
-    }
-
-    // Car forward headlight pool on road ahead: soft warm mist cone
-    vec3 headDir = vWorldPos - (uCarPos + vec3(2.2, 0.35, 0.0));
-    float headDist = length(headDir);
-    float headBeam = smoothstep(18.0, 3.5, headDist) * smoothstep(3.2, 0.0, abs(vWorldPos.z - uCarPos.z));
-    vec3 headlightGlow = vec3(0.96, 0.90, 0.75) * headBeam * 0.38;
-
-    // Thin crimson LED taillight road reflection behind car
-    vec3 tailDir = vWorldPos - (uCarPos + vec3(-2.2, 0.35, 0.0));
-    float tailDist = length(tailDir);
-    float tailBeam = smoothstep(7.5, 0.8, tailDist) * smoothstep(2.0, 0.0, abs(vWorldPos.z - uCarPos.z));
-    vec3 taillightGlow = vec3(0.85, 0.06, 0.06) * tailBeam * 0.32;
-
-    // Screen-space interleaved gradient dithering to eliminate 8-bit asphalt banding
-    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
-    vec3 finalCol = roadColor + lightAccum + headlightGlow + taillightGlow + dither;
-    gl_FragColor = vec4(finalCol, 1.0);
-  }
-`;
-
-// Volumetric Headlight Mist Cone Shader
-const HEADLIGHT_CONE_VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const HEADLIGHT_CONE_FRAG = /* glsl */ `
-  uniform float uTime;
+  uniform vec2 uResolution;
+  uniform vec2 uPointer;
+  uniform float uQuality;
   varying vec2 vUv;
 
-  void main() {
-    float lengthFade = smoothstep(1.0, 0.08, vUv.x);
-    float widthFade = smoothstep(0.5, 0.0, abs(vUv.y - 0.5));
-    float dust = 0.85 + 0.15 * sin(vUv.x * 24.0 - uTime * 6.0);
-    // Soft warm mist cone with gentle optical falloff
-    float alpha = lengthFade * widthFade * dust * 0.16;
-    gl_FragColor = vec4(0.96, 0.92, 0.78, alpha);
-  }
-`;
+  ${GLSL_DITHER}
+  ${GLSL_HASH}
+  ${GLSL_TONEMAP_SHOULDER}
 
-// Procedural Lunar Disc Shader with Lunar Maria & Soft Limb Darkening
-const MIDNIGHT_MOON_VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
-
-const MIDNIGHT_MOON_FRAG = /* glsl */ `
-  varying vec2 vUv;
-
-  float hash(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-  }
-
+  // Value noise for asphalt micro-grain and coastal mist
   float noise(vec2 p) {
     vec2 i = floor(p);
     vec2 f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
     return mix(
-      mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), f.x),
-      mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+      mix(hash21(i + vec2(0.0, 0.0)), hash21(i + vec2(1.0, 0.0)), f.x),
+      mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
       f.y
     );
   }
 
-  float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 4; i++) {
-      v += a * noise(p);
-      p = p * 2.15 + vec2(1.4, 2.7);
-      a *= 0.5;
+  // Smooth minimum for organic vehicle body blending
+  float smin(float a, float b, float k) {
+    float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+  }
+
+  // Signed distance to 2D line segment
+  float sdSegment(vec2 p, vec2 a, vec2 b) {
+    vec2 pa = p - a, ba = b - a;
+    float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+    return length(pa - ba * h);
+  }
+
+  // 2D Box SDF
+  float sdBox(vec2 p, vec2 b) {
+    vec2 d = abs(p) - b;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+  }
+
+  // Anti-aliased crescent moon SDF
+  vec3 renderCrescentMoon(vec2 uv, vec2 moonPos, float radius) {
+    vec2 p = uv - moonPos;
+    float d1 = length(p) - radius;
+    float d2 = length(p - vec2(radius * 0.42, radius * 0.18)) - radius * 0.92;
+    float crescent = max(d1, -d2);
+
+    float alpha = smoothstep(0.003, -0.003, crescent);
+    // Delicate atmospheric halo around the crescent
+    float glow = exp(-max(0.0, d1) * 35.0) * 0.35;
+
+    // Faint earthshine inside the dark lunar disc
+    float earthshine = smoothstep(0.003, -0.003, d1) * (1.0 - alpha) * 0.04;
+
+    vec3 moonCol = vec3(0.98, 0.96, 0.90) * alpha;
+    vec3 glowCol = vec3(0.65, 0.78, 0.95) * (glow + earthshine);
+    return moonCol + glowCol;
+  }
+
+  void main() {
+    vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / uResolution.y;
+
+    // Gentle camera sway influenced by pointer
+    uv += uPointer * vec2(0.025, 0.015);
+
+    vec3 finalColor = vec3(0.0);
+    float horizonY = -0.04;
+
+    // =========================================================================
+    // PARALLAX LAYER 4: Starlit Night Sky & Crescent Moon
+    // =========================================================================
+    if (uv.y > horizonY - 0.08) {
+      // Midnight navy to dark indigo twilight sky gradient
+      float skyGrad = clamp((uv.y - horizonY) / 0.65, 0.0, 1.0);
+      vec3 skyBase = mix(vec3(0.008, 0.018, 0.038), vec3(0.002, 0.005, 0.012), skyGrad);
+
+      // Pinpoint anti-aliased twinkling stars
+      vec2 starGrid = uv * 32.0;
+      vec2 starId = floor(starGrid);
+      vec2 starGv = fract(starGrid) - 0.5;
+      float starH = hash21(starId);
+      if (starH > 0.86 && uv.y > horizonY + 0.05) {
+        float twinkle = 0.75 + 0.25 * sin(uTime * (1.5 + starH * 4.0) + starH * 62.8);
+        float starD = length(starGv - (hash22(starId) - 0.5) * 0.7);
+        float starCore = exp(-starD * starD * 95.0);
+        vec3 starCol = mix(vec3(0.75, 0.88, 1.0), vec3(1.0, 0.95, 0.85), starH);
+        skyBase += starCol * starCore * twinkle * 0.85;
+      }
+
+      // Crisp crescent moon in upper right quadrant
+      vec2 moonPos = vec2(0.48, 0.28);
+      skyBase += renderCrescentMoon(uv, moonPos, 0.065);
+
+      finalColor = skyBase;
     }
-    return v;
-  }
 
-  void main() {
-    vec2 p = vUv * 2.0 - 1.0;
-    float r = length(p);
-    // Smooth anti-aliased lunar disc edge
-    float edge = smoothstep(1.0, 0.965, r);
-    if (edge <= 0.0) discard;
+    // =========================================================================
+    // PARALLAX LAYER 3: Distant Bay Water & Twinkling Bay Skyline Across Water
+    // =========================================================================
+    float waterTopY = horizonY;
+    float waterBottomY = horizonY - 0.06;
 
-    // Lunar maria crater surface variations
-    float maria = fbm(p * 3.4 + vec2(0.24, 0.51));
-    float craters = noise(p * 9.5) * 0.14;
+    if (uv.y <= waterTopY && uv.y >= waterBottomY - 0.02) {
+      // Dark coastal bay water with horizontal water ripple specular distortion
+      float waterRipple = sin(uv.x * 65.0 + uTime * 2.5) * 0.003 + noise(vec2(uv.x * 24.0, uTime * 0.8)) * 0.004;
+      vec3 bayWater = vec3(0.003, 0.008, 0.016);
 
-    // Limb darkening towards circumference
-    float limb = pow(clamp(1.0 - r, 0.0, 1.0), 0.32);
+      // Mirror reflection of distant city lights shimmering in bay water
+      float mirrorUvY = (waterTopY - uv.y) * 1.5;
+      float cityLightReflection = smoothstep(0.08, 0.0, abs(uv.x + 0.15)) * exp(-mirrorUvY * 18.0) * (0.6 + 0.4 * sin(uv.x * 120.0 + uTime * 5.0));
+      bayWater += vec3(0.95, 0.72, 0.25) * cityLightReflection * 0.25;
 
-    vec3 highlands = vec3(0.92, 0.96, 1.0);
-    vec3 basalt = vec3(0.68, 0.74, 0.84);
-    vec3 surface = mix(basalt, highlands, smoothstep(0.32, 0.68, maria + craters));
+      finalColor = mix(finalColor, bayWater, smoothstep(waterTopY + 0.005, waterTopY - 0.005, uv.y));
+    }
 
-    vec3 finalColor = surface * (0.65 + limb * 0.55);
-    gl_FragColor = vec4(finalColor, edge);
-  }
-`;
+    // Distant City Skyline Silhouettes with Micro-Window Twinkles (Parallax Speed 0.04)
+    float skylineX = uv.x + uTime * 0.04;
+    float skylineBlock = floor(skylineX * 22.0);
+    float skylineH = hash11(skylineBlock * 7.13);
+    if (skylineH > 0.45) {
+      float buildingHeight = horizonY + (skylineH - 0.45) * 0.16;
+      if (uv.y < buildingHeight && uv.y >= horizonY) {
+        vec3 buildingCol = vec3(0.006, 0.012, 0.022);
 
-// Exponential Atmospheric Moonlight Halo Quad
-const MIDNIGHT_HALO_VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-  }
-`;
+        // Micro-window grid inside skyline building
+        vec2 winUV = vec2(fract(skylineX * 22.0), (uv.y - horizonY) / 0.16) * vec2(6.0, 14.0);
+        float winH = hash21(floor(winUV) + skylineBlock * 13.0);
+        if (winH > 0.78) {
+          float winTwinkle = 0.6 + 0.4 * sin(uTime * 2.0 + winH * 32.0);
+          vec3 winColor = winH > 0.9 ? vec3(0.95, 0.75, 0.35) : vec3(0.35, 0.75, 0.95);
+          buildingCol += winColor * 0.35 * winTwinkle;
+        }
+        finalColor = buildingCol;
+      }
+    }
 
-const MIDNIGHT_HALO_FRAG = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vec2 p = vUv * 2.0 - 1.0;
-    float r = length(p);
-    float halo = exp(-r * 6.5) * 0.45 + exp(-r * 18.0) * 0.35;
-    float fade = smoothstep(1.0, 0.35, r);
-    float alpha = halo * fade * 0.22;
-    if (alpha < 0.005) discard;
-    vec3 haloCol = vec3(0.68, 0.84, 1.0);
-    gl_FragColor = vec4(haloCol, alpha);
-  }
-`;
+    // =========================================================================
+    // PARALLAX LAYER 2: Silhouetted Coastal Pines & Rolling Hills (Parallax 0.12)
+    // =========================================================================
+    float hillX = uv.x + uTime * 0.12;
+    float hillHeight = horizonY + 0.035 * sin(hillX * 3.5) + 0.018 * sin(hillX * 8.2 + 1.2) + 0.025;
 
-// Road Mist Spray Particle System Shader (Circular AA Discard)
-const ROAD_MIST_VERT = /* glsl */ `
-  attribute vec3 aOffset;
-  attribute float aSpeed;
-  attribute float aPhase;
+    // Coastal Pine tree silhouettes along ridge
+    float treeCell = floor(hillX * 18.0);
+    float treeH = hash11(treeCell * 19.3);
+    if (treeH > 0.55) {
+      float treeXInCell = fract(hillX * 18.0) - 0.5;
+      float treePeak = hillHeight + (treeH - 0.55) * 0.08;
+      float treeProfile = treePeak - abs(treeXInCell) * 0.09;
+      hillHeight = max(hillHeight, treeProfile);
+    }
 
-  uniform float uTime;
-  uniform vec3 uCarPos;
+    if (uv.y < hillHeight) {
+      // Dark coastal pine silhouette (#02050b) with subtle atmospheric depth fog
+      vec3 hillCol = vec3(0.004, 0.009, 0.015);
+      float rimFog = smoothstep(hillHeight - 0.015, hillHeight, uv.y) * 0.12;
+      hillCol += vec3(0.02, 0.045, 0.075) * rimFog;
+      finalColor = hillCol;
+    }
 
-  varying float vAlpha;
+    // =========================================================================
+    // ROADWAY & WET ASPHALT SHADER (Lower-Middle Third, Y < -0.06)
+    // =========================================================================
+    float roadTopY = -0.06;
+    if (uv.y < roadTopY) {
+      float roadDepth = (roadTopY - uv.y) / 0.55; // 0 at horizon, 1 at screen bottom
 
-  void main() {
-    vec3 pos = aOffset;
-    float trailDist = mod(pos.x + uTime * (16.0 + aSpeed * 12.0), 16.0);
-    vec3 worldPos = uCarPos + vec3(-trailDist - 2.0, pos.y + trailDist * 0.08, pos.z);
+      // Asphalt aggregate grain texture
+      vec2 roadTexUV = vec2(uv.x * 12.0 + uTime * 2.8, roadDepth * 28.0);
+      float grain = (hash21(floor(roadTexUV)) * 0.5 + hash21(floor(roadTexUV * 2.0)) * 0.5) * 0.035;
+      vec3 asphalt = vec3(0.018 + grain, 0.020 + grain, 0.026 + grain);
 
-    float age = trailDist / 16.0;
-    vAlpha = (1.0 - age) * 0.32 * sin(age * 3.14159);
+      // Scrolling dashed lane lines
+      float lineX = uv.x + uTime * 2.8;
+      float dash = step(0.48, fract(lineX * 1.8));
+      float isCenterLane = smoothstep(0.008, 0.002, abs(uv.y - (-0.36)));
+      float isEdgeLine = smoothstep(0.009, 0.003, abs(uv.y - (-0.10)));
+      vec3 laneLineColor = vec3(0.65, 0.68, 0.72) * 0.65;
+      asphalt = mix(asphalt, laneLineColor, isCenterLane * dash * 0.75 + isEdgeLine * 0.65);
 
-    vec4 mvPos = modelViewMatrix * vec4(worldPos, 1.0);
-    gl_Position = projectionMatrix * mvPos;
-    gl_PointSize = clamp((22.0 + aSpeed * 24.0) * (35.0 / -mvPos.z), 1.0, 48.0);
-  }
-`;
+      // Real-Time Passing Sodium Streetlights (Amber #f59e0b)
+      // Overhead lamp cycle passing rhythmically right-to-left
+      float lampSpeed = 0.55;
+      float lampCycle = fract(uTime * lampSpeed);
+      vec3 streetLightAccum = vec3(0.0);
 
-const ROAD_MIST_FRAG = /* glsl */ `
-  varying float vAlpha;
+      for (int i = 0; i < 3; i++) {
+        float offsetCycle = fract(lampCycle + float(i) * 0.3333);
+        float lampPosX = mix(0.95, -0.95, offsetCycle);
+        float lampPosY = 0.08;
 
-  void main() {
-    vec2 p = gl_PointCoord - 0.5;
-    float d2 = dot(p, p);
-    if (d2 > 0.25) discard;
-    float core = exp(-d2 * 14.0);
-    vec3 mistTint = vec3(0.65, 0.75, 0.9);
-    gl_FragColor = vec4(mistTint, vAlpha * core);
+        // Streetlight pole & lamp head
+        float lampDist = length(uv - vec2(lampPosX, lampPosY));
+        float lampGlow = exp(-lampDist * 8.5) * 0.45;
+        vec3 amberLight = vec3(1.0, 0.62, 0.15);
+
+        // Asphalt rough-grained shimmer specular reflection streak
+        float specX = exp(-pow(uv.x - lampPosX, 2.0) * 14.0);
+        float specFalloff = smoothstep(roadTopY, -0.45, uv.y);
+        float asphaltShimmer = specX * (0.65 + 0.35 * sin(roadTexUV.x * 6.0 + grain * 12.0)) * specFalloff;
+
+        streetLightAccum += amberLight * (lampGlow * 0.35 + asphaltShimmer * 0.42);
+      }
+
+      // Car Headlight forward road reflection pool (Soft warm mist projection)
+      float carHeadDistX = uv.x - 0.18;
+      float carHeadPool = smoothstep(0.35, -0.02, carHeadDistX) * smoothstep(roadTopY - 0.02, -0.38, uv.y) * smoothstep(-0.45, -0.28, uv.y);
+      vec3 headLightPool = vec3(0.95, 0.90, 0.78) * carHeadPool * 0.32;
+
+      // Car Taillight rear road reflection pool (Thin crimson LED shimmer)
+      float carTailDistX = -0.26 - uv.x;
+      float carTailPool = smoothstep(0.22, 0.0, carTailDistX) * smoothstep(roadTopY - 0.08, -0.32, uv.y) * smoothstep(-0.42, -0.26, uv.y);
+      vec3 tailLightPool = vec3(0.95, 0.08, 0.12) * carTailPool * 0.28;
+
+      finalColor = asphalt + streetLightAccum + headLightPool + tailLightPool;
+    }
+
+    // =========================================================================
+    // HERO SILHOUETTE: Sculpted Fastback Coupe Profile (Zero Boxy Geometry)
+    // =========================================================================
+    // Subtle organic damped suspension bounce from highway irregularities
+    float bounce = sin(uTime * 14.0) * 0.0022 + sin(uTime * 28.0) * 0.0009;
+    vec2 carOrigin = vec2(-0.02, -0.22 + bounce);
+    vec2 cp = uv - carOrigin;
+
+    // Fastback aerodynamic profile bounds: X from -0.30 to +0.32, Y from -0.04 to +0.10
+    float carMask = 0.0;
+    float cabinMask = 0.0;
+    float chromeRim = 0.0;
+
+    // Main lower body chassis
+    float bodyBox = sdBox(cp - vec2(0.01, 0.015), vec2(0.30, 0.038));
+    // Curved nose slope down to front splitter
+    float noseSlope = dot(cp - vec2(0.24, 0.02), normalize(vec2(1.0, 1.2)));
+    bodyBox = smin(bodyBox, noseSlope, 0.04);
+    // Rear fastback slope
+    float tailSlope = dot(cp - vec2(-0.24, 0.02), normalize(vec2(-1.0, 0.85)));
+    bodyBox = smin(bodyBox, tailSlope, 0.035);
+
+    // Fastback aerodynamic greenhouse cabin
+    // Windshield slope -> Flat roofline -> Swept fastback rear deck
+    float cabinBox = sdBox(cp - vec2(-0.035, 0.068), vec2(0.14, 0.028));
+    float windshieldSlope = dot(cp - vec2(0.11, 0.055), normalize(vec2(1.2, 1.0)));
+    float rearGlassSlope = dot(cp - vec2(-0.16, 0.055), normalize(vec2(-0.9, 0.75)));
+    cabinBox = max(cabinBox, windshieldSlope);
+    cabinBox = max(cabinBox, rearGlassSlope);
+
+    // Car Body Union
+    float carSDF = smin(bodyBox, cabinBox, 0.032);
+
+    // Wheel Well Cutouts: Front at X = 0.18, Rear at X = -0.18
+    float frontWell = length(cp - vec2(0.18, -0.015)) - 0.056;
+    float rearWell = length(cp - vec2(-0.18, -0.015)) - 0.056;
+    carSDF = max(carSDF, -frontWell);
+    carSDF = max(carSDF, -rearWell);
+
+    // Render Car Silhouette with Sub-Pixel Anti-Aliasing
+    float aaPixel = 1.8 / uResolution.y;
+    carMask = smoothstep(aaPixel, -aaPixel, carSDF);
+
+    if (carMask > 0.001) {
+      // Glossy deep midnight obsidian car paint (#050914)
+      vec3 paintBase = vec3(0.018, 0.032, 0.058);
+
+      // Real-Time Traveling Specular Rim Highlights:
+      // Glides naturally from hood -> windshield -> roofline -> rear deck as streetlights pass
+      float lampCycle = fract(uTime * 0.55);
+      float sweepX = mix(0.45, -0.45, lampCycle);
+      float sweepHighlight = exp(-pow(cp.x - sweepX, 2.0) * 28.0) * smoothstep(0.02, 0.09, cp.y);
+      vec3 specularSweep = vec3(1.0, 0.85, 0.55) * sweepHighlight * 0.75;
+
+      // Chrome body accent line along door sill & roof arch
+      float roofArchDist = abs(cabinBox);
+      chromeRim = smoothstep(0.006, 0.0, roofArchDist) * smoothstep(-0.16, 0.12, cp.x) * 0.45;
+
+      // Tinted cabin glass with faint warm tungsten dashboard glow
+      float glassInner = smoothstep(0.012, -0.004, cabinBox);
+      vec3 glassColor = vec3(0.008, 0.014, 0.024);
+      // Warm tungsten dashboard glow (#d99b52) glowing softly from front cockpit
+      float dashGlow = exp(-length(cp - vec2(0.065, 0.05)) * 18.0) * 0.38;
+      glassColor += vec3(0.85, 0.61, 0.32) * dashGlow;
+
+      vec3 carSurface = mix(paintBase + specularSweep + chromeRim, glassColor, glassInner * 0.85);
+
+      finalColor = mix(finalColor, carSurface, carMask);
+    }
+
+    // Rotating Multi-Spoke Alloy Wheels
+    // Front Wheel (X = 0.18), Rear Wheel (X = -0.18)
+    vec2 frontWheelUV = cp - vec2(0.18, -0.015);
+    vec2 rearWheelUV = cp - vec2(-0.18, -0.015);
+    float wheelRadius = 0.048;
+
+    for (int w = 0; w < 2; w++) {
+      vec2 wp = w == 0 ? frontWheelUV : rearWheelUV;
+      float wd = length(wp);
+      if (wd < wheelRadius + 0.004) {
+        float tireMask = smoothstep(wheelRadius, wheelRadius - 0.008, wd);
+        float rimMask = smoothstep(wheelRadius - 0.012, wheelRadius - 0.016, wd);
+
+        // Rotating 5-Spoke Alloy Rims
+        float angle = atan(wp.y, wp.x) + uTime * 24.0;
+        float spokes = abs(sin(angle * 2.5));
+        float spokeMask = smoothstep(0.45, 0.85, spokes) * rimMask;
+
+        vec3 tireCol = vec3(0.015, 0.018, 0.022);
+        vec3 rimCol = mix(vec3(0.08, 0.12, 0.18), vec3(0.75, 0.80, 0.88), spokeMask * 0.7);
+
+        vec3 wheelPixel = mix(tireCol, rimCol, rimMask);
+        float wheelTotalMask = smoothstep(wheelRadius + 0.002, wheelRadius - 0.002, wd);
+        finalColor = mix(finalColor, wheelPixel, wheelTotalMask);
+      }
+    }
+
+    // Forward LED Headlight Projector & Volumetric Coastal Mist Cone
+    vec2 hlOrigin = carOrigin + vec2(0.30, 0.025);
+    float hlDist = length(uv - hlOrigin);
+    float hlFlare = exp(-hlDist * 65.0);
+    finalColor += vec3(1.0, 0.96, 0.88) * hlFlare * 0.85;
+
+    // Volumetric Headlight Cone in light coastal mist
+    vec2 coneDir = uv - hlOrigin;
+    if (coneDir.x > 0.0 && coneDir.x < 0.65) {
+      float coneWidth = coneDir.x * 0.32;
+      float inCone = smoothstep(coneWidth, 0.0, abs(coneDir.y + coneDir.x * 0.12));
+      float mistNoise = 0.82 + 0.18 * noise(vec2(uv.x * 8.0 - uTime * 1.5, uv.y * 12.0));
+      float coneFalloff = smoothstep(0.65, 0.05, coneDir.x) * mistNoise * 0.22;
+      finalColor += vec3(0.95, 0.92, 0.84) * inCone * coneFalloff;
+    }
+
+    // Sleek Rear LED Taillight Bar
+    vec2 tlOrigin = carOrigin + vec2(-0.295, 0.032);
+    float tlDist = length(uv - tlOrigin);
+    float tlFlare = exp(-tlDist * 75.0);
+    // Thin horizontal lightbar segment
+    float tlBar = sdSegment(uv, tlOrigin - vec2(0.004, 0.0), tlOrigin + vec2(0.004, 0.0));
+    float tlBarMask = smoothstep(0.006, 0.001, tlBar);
+    finalColor += vec3(0.95, 0.06, 0.08) * (tlBarMask * 1.1 + tlFlare * 0.65);
+
+    // =========================================================================
+    // PARALLAX LAYER 0: Fast Blurred Foreground Guardrail Posts (Extreme Speed)
+    // =========================================================================
+    if (uv.y < -0.32 && uv.y > -0.48) {
+      float guardX = uv.x + uTime * 4.2;
+      float postGv = fract(guardX * 3.5);
+      float postDist = abs(postGv - 0.5);
+      // Speed motion blur horizontally
+      float postMask = smoothstep(0.18, 0.02, postDist) * smoothstep(-0.48, -0.44, uv.y) * smoothstep(-0.32, -0.35, uv.y);
+      vec3 guardrailCol = vec3(0.08, 0.10, 0.14) * 0.45;
+      finalColor = mix(finalColor, guardrailCol, postMask * 0.65);
+    }
+
+    // Soft 35mm cinema vignette
+    vec2 screenQ = gl_FragCoord.xy / uResolution.xy - 0.5;
+    finalColor *= clamp(1.0 - dot(screenQ, screenQ) * 0.75, 0.0, 1.0);
+
+    // Soft HDR shoulder compression to prevent chalky white blowouts
+    finalColor = softHdrShoulder(finalColor, 0.35);
+
+    // Dither against 8-bit banding
+    finalColor += screenDither(gl_FragCoord.xy);
+
+    gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
 
@@ -244,578 +389,84 @@ export class MidnightCruiseScene implements ISpatialScene {
   };
   public readonly exposure = 0.80;
 
-  // Car Components
-  private carGroup = new THREE.Group();
-  private carBodyMesh: THREE.Mesh | null = null;
-  private wheels: THREE.Mesh[] = [];
-  private headlightCone: THREE.Mesh | null = null;
-
-  // Road & Streetlights
-  private roadMesh: THREE.Mesh | null = null;
-  private roadMat: THREE.ShaderMaterial | null = null;
-  private streetlightGroup = new THREE.Group();
-  private activeLightPositions: THREE.Vector3[] = [];
-  private activeLightColors: THREE.Vector3[] = [];
-
-  // Parallax Scenery
-  private guardrailGroup = new THREE.Group();
-  private treeGroup = new THREE.Group();
-  private skylineGroup = new THREE.Group();
-  private moonMesh: THREE.Mesh | null = null;
-  private moonHaloMesh: THREE.Mesh | null = null;
-  private carPassingLight: THREE.PointLight | null = null;
-  private roadMistPoints: THREE.Points | null = null;
-  private roadMistMat: THREE.ShaderMaterial | null = null;
-
-  // Resource Tracking
-  private disposableGeometries: THREE.BufferGeometry[] = [];
-  private disposableMaterials: THREE.Material[] = [];
-
+  private quadMesh: THREE.Mesh | null = null;
+  private quadGeo: THREE.PlaneGeometry | null = null;
+  private cruiseMat: THREE.ShaderMaterial | null = null;
   private smoothPointer = new THREE.Vector2();
+  private qualityScale = 1.0;
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x070c17);
-    this.scene.fog = new THREE.FogExp2(0x09101e, 0.011);
-
-    // Side-tracking perspective: camera to the side-rear of the car, looking slightly forward
-    this.camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 450);
-    this.camera.position.set(-2.2, 2.1, 9.4);
+    this.scene.background = new THREE.Color(0x02050e);
+    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.camera.position.set(0, 0, 1);
   }
 
-  public init(_renderer: THREE.WebGLRenderer): void {
-    // 1. Ambient & Directional Moonlight
-    const hemi = new THREE.HemisphereLight(0x7dd3fc, 0x09101d, 0.45);
-    this.scene.add(hemi);
+  public init(renderer: THREE.WebGLRenderer): void {
+    const size = renderer.getSize(new THREE.Vector2());
 
-    const moonDir = new THREE.DirectionalLight(0xa5f3fc, 0.75);
-    moonDir.position.set(-40, 60, -80);
-    this.scene.add(moonDir);
-
-    // 2. Build the Sleek Minimalist Car Silhouette
-    this.buildCar();
-
-    // 2b. Road Mist & Tire Spray Particle System (Circular AA Discard)
-    const mistCount = 320;
-    const mistGeo = new THREE.BufferGeometry();
-    const mistOffsets = new Float32Array(mistCount * 3);
-    const mistSpeeds = new Float32Array(mistCount);
-    const mistPhases = new Float32Array(mistCount);
-
-    for (let i = 0; i < mistCount; i++) {
-      mistOffsets[i * 3 + 0] = Math.random() * 16.0;
-      mistOffsets[i * 3 + 1] = 0.08 + Math.random() * 0.45;
-      mistOffsets[i * 3 + 2] = (Math.random() - 0.5) * 2.8;
-      mistSpeeds[i] = Math.random();
-      mistPhases[i] = Math.random();
-    }
-
-    mistGeo.setAttribute('position', new THREE.BufferAttribute(mistOffsets, 3));
-    mistGeo.setAttribute('aOffset', new THREE.BufferAttribute(mistOffsets, 3));
-    mistGeo.setAttribute('aSpeed', new THREE.BufferAttribute(mistSpeeds, 1));
-    mistGeo.setAttribute('aPhase', new THREE.BufferAttribute(mistPhases, 1));
-    this.disposableGeometries.push(mistGeo);
-
-    this.roadMistMat = new THREE.ShaderMaterial({
-      vertexShader: ROAD_MIST_VERT,
-      fragmentShader: ROAD_MIST_FRAG,
+    this.quadGeo = new THREE.PlaneGeometry(2, 2);
+    this.cruiseMat = new THREE.ShaderMaterial({
+      vertexShader: CRUISE_VERTEX_SHADER,
+      fragmentShader: CRUISE_FRAGMENT_SHADER,
       uniforms: {
         uTime: { value: 0 },
-        uCarPos: { value: this.carGroup.position },
+        uResolution: { value: new THREE.Vector2(size.x, size.y) },
+        uPointer: { value: new THREE.Vector2(0, 0) },
+        uQuality: { value: 1.0 },
       },
-      transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      depthTest: false,
     });
-    this.disposableMaterials.push(this.roadMistMat);
 
-    this.roadMistPoints = new THREE.Points(mistGeo, this.roadMistMat);
-    this.roadMistPoints.frustumCulled = false;
-    this.scene.add(this.roadMistPoints);
-
-    // 2c. Dynamic Streetlight Specular Sweep Light for Car Body & Glass
-    this.carPassingLight = new THREE.PointLight(0xffaa33, 0, 16, 1.8);
-    this.carPassingLight.position.set(0, 4.2, -2.8);
-    this.scene.add(this.carPassingLight);
-
-    // 3. Wet Highway Asphalt Road
-    const roadGeo = new THREE.PlaneGeometry(ROAD_LENGTH, ROAD_WIDTH, 12, 12);
-    roadGeo.rotateX(-Math.PI / 2);
-    this.disposableGeometries.push(roadGeo);
-
-    for (let i = 0; i < 6; i++) {
-      this.activeLightPositions.push(new THREE.Vector3((i - 2.5) * 32, 5.2, -6.5));
-      const isAmber = i % 2 === 0;
-      this.activeLightColors.push(
-        isAmber ? new THREE.Vector3(1.0, 0.65, 0.22) : new THREE.Vector3(0.55, 0.85, 1.0)
-      );
-    }
-
-    this.roadMat = new THREE.ShaderMaterial({
-      vertexShader: WET_ROAD_VERT,
-      fragmentShader: WET_ROAD_FRAG,
-      uniforms: {
-        uTime: { value: 0 },
-        uCarPos: { value: this.carGroup.position },
-        uLightPos: { value: this.activeLightPositions },
-        uLightColor: { value: this.activeLightColors },
-      },
-    });
-    this.disposableMaterials.push(this.roadMat);
-
-    this.roadMesh = new THREE.Mesh(roadGeo, this.roadMat);
-    this.roadMesh.position.set(0, 0, 0);
-    this.scene.add(this.roadMesh);
-
-    // 4. Streetlights (Arched light poles along road edge)
-    this.buildStreetlights();
-
-    // 5. Foreground Guardrails (Speed Blur Parallax)
-    this.buildGuardrails();
-
-    // 6. Midground Silhouetted Trees
-    this.buildTrees();
-
-    // 7. Distant City Skyline & Moon
-    this.buildSkyline();
-  }
-
-  private buildCar(): void {
-    // Sleek, low-slung aerodynamic fastback coupe chassis
-    const bodyGeo = new THREE.BoxGeometry(4.6, 0.70, 1.95);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0x070b14,
-      roughness: 0.24,
-      metalness: 0.85,
-    });
-    this.disposableGeometries.push(bodyGeo);
-    this.disposableMaterials.push(bodyMat);
-
-    this.carBodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    this.carBodyMesh.position.set(0, 0.65, 0);
-    this.carGroup.add(this.carBodyMesh);
-
-    // Sculpted curved fastback cabin with deep tinted glass
-    const cabinGeo = new THREE.BoxGeometry(2.4, 0.52, 1.58);
-    const cabinMat = new THREE.MeshStandardMaterial({
-      color: 0x04060c,
-      roughness: 0.12,
-      metalness: 0.92,
-      transparent: true,
-      opacity: 0.88,
-    });
-    this.disposableGeometries.push(cabinGeo);
-    this.disposableMaterials.push(cabinMat);
-
-    const cabinMesh = new THREE.Mesh(cabinGeo, cabinMat);
-    cabinMesh.position.set(-0.35, 1.18, 0);
-    this.carGroup.add(cabinMesh);
-
-    // Warm tungsten dashboard silhouette glowing faintly inside tinted cabin
-    const dashGeo = new THREE.BoxGeometry(0.35, 0.08, 1.05);
-    const dashMat = new THREE.MeshBasicMaterial({ color: 0xd99b52 });
-    this.disposableGeometries.push(dashGeo);
-    this.disposableMaterials.push(dashMat);
-
-    const dashMesh = new THREE.Mesh(dashGeo, dashMat);
-    dashMesh.position.set(0.38, 0.98, 0);
-    this.carGroup.add(dashMesh);
-
-    // Glowing warm LED projector headlight slits
-    const hlGeo = new THREE.BoxGeometry(0.12, 0.14, 0.36);
-    const hlMat = new THREE.MeshBasicMaterial({ color: 0xfffaed });
-    this.disposableGeometries.push(hlGeo);
-    this.disposableMaterials.push(hlMat);
-
-    const hlMesh = new THREE.Mesh(hlGeo, hlMat);
-    hlMesh.position.set(2.31, 0.68, 0.65);
-    const hrMesh = hlMesh.clone();
-    hrMesh.position.z = -0.65;
-    this.carGroup.add(hlMesh, hrMesh);
-
-    // Thin sleek crimson LED taillight lightbar
-    const tlGeo = new THREE.BoxGeometry(0.08, 0.09, 1.82);
-    const tlMat = new THREE.MeshBasicMaterial({ color: 0xd91624 });
-    this.disposableGeometries.push(tlGeo);
-    this.disposableMaterials.push(tlMat);
-
-    const tlMesh = new THREE.Mesh(tlGeo, tlMat);
-    tlMesh.position.set(-2.31, 0.72, 0);
-    this.carGroup.add(tlMesh);
-
-    // Volumetric forward headlight projection beam cone (warm soft mist cone)
-    const coneGeo = new THREE.PlaneGeometry(16, 5.2);
-    coneGeo.rotateZ(Math.PI / 2);
-    coneGeo.rotateY(Math.PI / 2);
-    this.disposableGeometries.push(coneGeo);
-
-    const coneMat = new THREE.ShaderMaterial({
-      vertexShader: HEADLIGHT_CONE_VERT,
-      fragmentShader: HEADLIGHT_CONE_FRAG,
-      uniforms: { uTime: { value: 0 } },
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-    });
-    this.disposableMaterials.push(coneMat);
-
-    this.headlightCone = new THREE.Mesh(coneGeo, coneMat);
-    this.headlightCone.position.set(10.2, 0.65, 0);
-    this.carGroup.add(this.headlightCone);
-
-    // 4 Wheels with alloy rims & smooth rotation
-    const wheelGeo = new THREE.CylinderGeometry(0.36, 0.36, 0.32, 16);
-    wheelGeo.rotateX(Math.PI / 2);
-    const wheelMat = new THREE.MeshStandardMaterial({
-      color: 0x181e28,
-      roughness: 0.28,
-      metalness: 0.85,
-    });
-    this.disposableGeometries.push(wheelGeo);
-    this.disposableMaterials.push(wheelMat);
-
-    const wheelOffsets = [
-      [1.35, 0.36, 0.95],
-      [1.35, 0.36, -0.95],
-      [-1.35, 0.36, 0.95],
-      [-1.35, 0.36, -0.95],
-    ];
-
-    for (const [wx, wy, wz] of wheelOffsets) {
-      const w = new THREE.Mesh(wheelGeo, wheelMat);
-      w.position.set(wx, wy, wz);
-      this.wheels.push(w);
-      this.carGroup.add(w);
-    }
-
-    this.carGroup.position.set(0, 0, 0);
-    this.scene.add(this.carGroup);
-  }
-
-  private buildStreetlights(): void {
-    const poleGeo = new THREE.CylinderGeometry(0.08, 0.12, 7.5, 8);
-    const armGeo = new THREE.BoxGeometry(2.4, 0.08, 0.08);
-    const lampGeo = new THREE.BoxGeometry(0.8, 0.15, 0.35);
-
-    const poleMat = new THREE.MeshStandardMaterial({
-      color: 0x141a24,
-      roughness: 0.6,
-      metalness: 0.8,
-    });
-    this.disposableGeometries.push(poleGeo, armGeo, lampGeo);
-    this.disposableMaterials.push(poleMat);
-
-    for (let i = 0; i < STREETLIGHT_COUNT; i++) {
-      const group = new THREE.Group();
-      const pole = new THREE.Mesh(poleGeo, poleMat);
-      pole.position.y = 3.75;
-      group.add(pole);
-
-      const arm = new THREE.Mesh(armGeo, poleMat);
-      arm.position.set(0.9, 7.3, 0);
-      group.add(arm);
-
-      // Clean warm sodium-vapor amber streetlights spaced overhead
-      const lampMat = new THREE.MeshBasicMaterial({
-        color: 0xd98822,
-      });
-      const lamp = new THREE.Mesh(lampGeo, lampMat);
-      lamp.position.set(1.9, 7.2, 0);
-      group.add(lamp);
-
-      group.position.set((i - STREETLIGHT_COUNT * 0.5) * 28, 0, -6.8);
-      this.streetlightGroup.add(group);
-    }
-
-    this.scene.add(this.streetlightGroup);
-  }
-
-  private buildGuardrails(): void {
-    const postGeo = new THREE.BoxGeometry(0.12, 0.9, 0.12);
-    const railGeo = new THREE.BoxGeometry(ROAD_LENGTH, 0.22, 0.08);
-    const guardMat = new THREE.MeshStandardMaterial({
-      color: 0x1f2937,
-      roughness: 0.45,
-      metalness: 0.75,
-    });
-    this.disposableGeometries.push(postGeo, railGeo);
-    this.disposableMaterials.push(guardMat);
-
-    for (let i = 0; i < GUARDRAIL_POST_COUNT; i++) {
-      const post = new THREE.Mesh(postGeo, guardMat);
-      post.position.set((i - GUARDRAIL_POST_COUNT * 0.5) * 5.5, 0.45, 6.2);
-      this.guardrailGroup.add(post);
-    }
-
-    const rail = new THREE.Mesh(railGeo, guardMat);
-    rail.position.set(0, 0.65, 6.2);
-    this.guardrailGroup.add(rail);
-
-    this.scene.add(this.guardrailGroup);
-  }
-
-  private buildTrees(): void {
-    const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 4.2, 6);
-    const foliageGeo = new THREE.ConeGeometry(2.2, 6.5, 6);
-    const treeMat = new THREE.MeshStandardMaterial({
-      color: 0x050912,
-      roughness: 0.9,
-    });
-    this.disposableGeometries.push(trunkGeo, foliageGeo);
-    this.disposableMaterials.push(treeMat);
-
-    for (let i = 0; i < TREE_COUNT; i++) {
-      const tree = new THREE.Group();
-      const trunk = new THREE.Mesh(trunkGeo, treeMat);
-      trunk.position.y = 2.1;
-      const foliage = new THREE.Mesh(foliageGeo, treeMat);
-      foliage.position.y = 5.8;
-      tree.add(trunk, foliage);
-
-      const x = (i - TREE_COUNT * 0.5) * 8.5;
-      const z = -12.5 - Math.random() * 8.0;
-      tree.position.set(x, 0, z);
-      this.treeGroup.add(tree);
-    }
-
-    this.scene.add(this.treeGroup);
-  }
-
-  private buildSkyline(): void {
-    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-    const bldgMat = new THREE.MeshBasicMaterial({ color: 0x070c18 });
-    this.disposableGeometries.push(boxGeo);
-    this.disposableMaterials.push(bldgMat);
-
-    // Distant dark silhouette buildings with subtle warm window points
-    for (let i = 0; i < SKYLINE_BUILDING_COUNT; i++) {
-      const bldg = new THREE.Mesh(boxGeo, bldgMat);
-      const w = 6 + Math.random() * 9;
-      const h = 18 + Math.random() * 38;
-      const d = 6 + Math.random() * 9;
-      bldg.scale.set(w, h, d);
-      bldg.position.set((i - SKYLINE_BUILDING_COUNT * 0.5) * 11, h * 0.5, -95 - (i % 3) * 18);
-      this.skylineGroup.add(bldg);
-    }
-    this.scene.add(this.skylineGroup);
-
-    // Glowing Procedural Moon & Soft Atmospheric Halo
-    const moonGeo = new THREE.PlaneGeometry(9.2, 9.2);
-    const moonMat = new THREE.ShaderMaterial({
-      vertexShader: MIDNIGHT_MOON_VERT,
-      fragmentShader: MIDNIGHT_MOON_FRAG,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    });
-    this.disposableGeometries.push(moonGeo);
-    this.disposableMaterials.push(moonMat);
-
-    this.moonMesh = new THREE.Mesh(moonGeo, moonMat);
-    this.moonMesh.position.set(38, 36, -140);
-    this.scene.add(this.moonMesh);
-
-    const haloGeo = new THREE.PlaneGeometry(36, 36);
-    const haloMat = new THREE.ShaderMaterial({
-      vertexShader: MIDNIGHT_HALO_VERT,
-      fragmentShader: MIDNIGHT_HALO_FRAG,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-    });
-    this.disposableGeometries.push(haloGeo);
-    this.disposableMaterials.push(haloMat);
-
-    this.moonHaloMesh = new THREE.Mesh(haloGeo, haloMat);
-    this.moonHaloMesh.position.set(38, 36, -141);
-    this.scene.add(this.moonHaloMesh);
+    this.quadMesh = new THREE.Mesh(this.quadGeo, this.cruiseMat);
+    this.quadMesh.frustumCulled = false;
+    this.scene.add(this.quadMesh);
   }
 
   public update(delta: number, elapsed: number, pointer: THREE.Vector2): void {
     this.smoothPointer.lerp(pointer, Math.min(1, delta * 2.5));
 
-    const speed = 28.0; // Highway cruise speed (units/sec)
-
-    // 1. Suspension Micro-Bounce on Car Body
-    const bounce =
-      Math.sin(elapsed * 13.0) * 0.012 +
-      Math.sin(elapsed * 23.0 + 1.2) * 0.007 +
-      Math.sin(elapsed * 7.5) * 0.009;
-    if (this.carBodyMesh) {
-      this.carBodyMesh.position.y = 0.72 + bounce;
+    if (this.cruiseMat) {
+      this.cruiseMat.uniforms.uTime.value = elapsed;
+      this.cruiseMat.uniforms.uPointer.value.copy(this.smoothPointer);
+      this.cruiseMat.uniforms.uQuality.value = this.qualityScale;
     }
-
-    // 2. Continuous Wheel Rotation
-    for (const w of this.wheels) {
-      w.rotation.x -= speed * delta * 1.5;
-    }
-
-    // 3. Smooth Multi-Harmonic Side-Tracking Camera
-    const camSwayX = Math.sin(elapsed * 0.18) * 0.45 + this.smoothPointer.x * 1.2;
-    const camSwayY = Math.sin(elapsed * 0.22) * 0.25 + this.smoothPointer.y * 0.8;
-    const camSwayZ = Math.cos(elapsed * 0.15) * 0.4;
-
-    this.camera.position.set(-2.2 + camSwayX, 2.1 + camSwayY, 9.4 + camSwayZ);
-    this.camera.lookAt(1.8 + this.smoothPointer.x * 0.8, 1.2, 0);
-
-    // 4. Parallax Scrolling: Streetlights
-    const slSpan = STREETLIGHT_COUNT * 24;
-    for (const group of this.streetlightGroup.children) {
-      group.position.x -= speed * delta;
-      if (group.position.x < -slSpan * 0.5) {
-        group.position.x += slSpan;
-      }
-    }
-
-    // Update active light uniforms for road shader
-    for (let i = 0; i < 6; i++) {
-      const slGroup = this.streetlightGroup.children[i % this.streetlightGroup.children.length];
-      if (slGroup) {
-        this.activeLightPositions[i].set(slGroup.position.x, 7.2, slGroup.position.z);
-      }
-    }
-
-    // 5. Parallax Scrolling: Guardrails (fastest)
-    const grSpan = GUARDRAIL_POST_COUNT * 5.5;
-    for (const post of this.guardrailGroup.children) {
-      if (
-        post instanceof THREE.Mesh &&
-        post.geometry instanceof THREE.BoxGeometry &&
-        post.geometry.parameters.width < 1.0
-      ) {
-        post.position.x -= speed * delta;
-        if (post.position.x < -grSpan * 0.5) {
-          post.position.x += grSpan;
-        }
-      }
-    }
-
-    // 6. Parallax Scrolling: Midground Trees
-    const treeSpan = TREE_COUNT * 8.5;
-    for (const tree of this.treeGroup.children) {
-      tree.position.x -= speed * delta * 0.75;
-      if (tree.position.x < -treeSpan * 0.5) {
-        tree.position.x += treeSpan;
-      }
-    }
-
-    // 7. Parallax Scrolling: Distant Skyline (slowest)
-    const skySpan = SKYLINE_BUILDING_COUNT * 11;
-    for (const bldg of this.skylineGroup.children) {
-      bldg.position.x -= speed * delta * 0.18;
-      if (bldg.position.x < -skySpan * 0.5) {
-        bldg.position.x += skySpan;
-      }
-    }
-
-    // Update shaders
-    if (this.roadMat) {
-      this.roadMat.uniforms.uTime.value = elapsed;
-      this.roadMat.uniforms.uCarPos.value.copy(this.carGroup.position);
-    }
-
-    if (this.headlightCone) {
-      const hcMat = this.headlightCone.material as THREE.ShaderMaterial;
-      hcMat.uniforms.uTime.value = elapsed;
-    }
-
-    // 8. Dynamic streetlight specular sweep across car paint & greenhouse glass
-    let minAbsX = 999;
-    let closestX = 0;
-    let closestIsAmber = true;
-    for (let i = 0; i < this.streetlightGroup.children.length; i++) {
-      const sl = this.streetlightGroup.children[i];
-      const absX = Math.abs(sl.position.x);
-      if (absX < minAbsX) {
-        minAbsX = absX;
-        closestX = sl.position.x;
-        closestIsAmber = i % 2 === 0;
-      }
-    }
-
-    if (this.carPassingLight) {
-      this.carPassingLight.position.set(closestX, 4.2, -2.8);
-      this.carPassingLight.color.set(closestIsAmber ? 0xffaa33 : 0x93c5fd);
-      const sweepFactor = Math.exp(-minAbsX * minAbsX * 0.08);
-      this.carPassingLight.intensity = sweepFactor * 52.0;
-    }
-
-    // Update road mist spray
-    if (this.roadMistMat) {
-      this.roadMistMat.uniforms.uTime.value = elapsed;
-      this.roadMistMat.uniforms.uCarPos.value.copy(this.carGroup.position);
-    }
-
-    // Billboard procedural moon and exponential halo
-    if (this.moonMesh) this.moonMesh.lookAt(this.camera.position);
-    if (this.moonHaloMesh) this.moonHaloMesh.lookAt(this.camera.position);
   }
 
   public resize(width: number, height: number): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+
+    if (this.cruiseMat) {
+      this.cruiseMat.uniforms.uResolution.value.set(width, height);
+    }
   }
 
-  public setQuality(_scale: number): void {
-    // Highly optimized low-polygon geometry with custom shaders, maintains consistent smooth 60fps
+  public setQuality(scale: number): void {
+    this.qualityScale = Math.max(0.4, Math.min(1.0, scale));
+    if (this.cruiseMat) {
+      this.cruiseMat.uniforms.uQuality.value = this.qualityScale;
+    }
   }
 
   public getActiveInstanceCount(): number {
-    return (
-      STREETLIGHT_COUNT +
-      GUARDRAIL_POST_COUNT +
-      TREE_COUNT +
-      SKYLINE_BUILDING_COUNT +
-      this.wheels.length +
-      (this.roadMistPoints ? 320 : 0) +
-      8
-    );
+    return 1;
   }
 
   public dispose(): void {
-    this.scene.remove(this.carGroup);
-    this.scene.remove(this.streetlightGroup);
-    this.scene.remove(this.guardrailGroup);
-    this.scene.remove(this.treeGroup);
-    this.scene.remove(this.skylineGroup);
-
-    if (this.roadMesh) {
-      this.scene.remove(this.roadMesh);
-      this.roadMesh = null;
+    if (this.quadMesh) {
+      this.scene.remove(this.quadMesh);
+      this.quadMesh = null;
     }
-
-    if (this.moonMesh) {
-      this.scene.remove(this.moonMesh);
-      this.moonMesh = null;
+    if (this.quadGeo) {
+      this.quadGeo.dispose();
+      this.quadGeo = null;
     }
-
-    if (this.moonHaloMesh) {
-      this.scene.remove(this.moonHaloMesh);
-      this.moonHaloMesh = null;
+    if (this.cruiseMat) {
+      this.cruiseMat.dispose();
+      this.cruiseMat = null;
     }
-
-    if (this.carPassingLight) {
-      this.scene.remove(this.carPassingLight);
-      this.carPassingLight = null;
-    }
-
-    if (this.roadMistPoints) {
-      this.scene.remove(this.roadMistPoints);
-      this.roadMistPoints = null;
-    }
-    this.roadMistMat = null;
-
-    for (const geo of this.disposableGeometries) {
-      geo.dispose();
-    }
-    for (const mat of this.disposableMaterials) {
-      mat.dispose();
-    }
-    this.disposableGeometries = [];
-    this.disposableMaterials = [];
-
     this.scene.clear();
   }
 }

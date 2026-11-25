@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
+import { GLSL_DITHER } from '../shaders/common';
 
 const SPARSE_STAR_COUNT = 850;
 
@@ -144,30 +145,35 @@ const GALAXY_SMUDGE_VERT = /* glsl */ `
 
 const GALAXY_SMUDGE_FRAG = /* glsl */ `
   uniform float uTime;
+  uniform float uFade;
   varying vec2 vUv;
 
-  float screenDither(vec2 fc) {
-    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
-  }
+  ${GLSL_DITHER}
 
   void main() {
     vec2 p = vUv * 2.0 - 1.0;
+    // Breathtaking tilted viewing perspective
+    p.y *= 1.65;
     float r = length(p);
     if (r > 1.0) discard;
 
     float angle = atan(p.y, p.x);
-    // Logarithmic spiral arms
-    float spiral = sin(angle * 2.0 - log(max(r, 0.02)) * 3.2 + uTime * 0.04);
-    float arms = smoothstep(-0.2, 0.8, spiral) * exp(-r * 3.2);
-    float core = exp(-r * 9.0) * 1.8;
+    // Logarithmic grand-design spiral arms
+    float spiral = sin(angle * 2.0 - log(max(r, 0.015)) * 3.4 + uTime * 0.035);
+    float arms = smoothstep(-0.15, 0.85, spiral) * exp(-r * 2.8);
+    // Dark absorbing cosmic dust lanes carving into inner arm edges
+    float dustLane = smoothstep(-0.4, 0.05, sin(angle * 2.0 - log(max(r, 0.015)) * 3.4 - 0.45));
+    arms *= (0.45 + 0.55 * dustLane);
 
-    float alpha = (core + arms * 0.45) * smoothstep(1.0, 0.55, r);
-    vec3 coreColor = vec3(0.95, 0.88, 0.72);
-    vec3 armColor = vec3(0.35, 0.65, 0.95);
+    float core = exp(-r * 7.5) * 2.2;
+    float alpha = (core * 0.65 + arms * 0.45) * smoothstep(1.0, 0.45, r) * uFade;
+
+    vec3 coreColor = vec3(0.98, 0.90, 0.75); // Warm golden galactic nucleus
+    vec3 armColor = vec3(0.38, 0.72, 0.95);  // Soft star-forming blue stellar arms
     vec3 col = mix(armColor, coreColor, core / max(core + arms, 0.001));
     col += screenDither(gl_FragCoord.xy);
 
-    gl_FragColor = vec4(col * 0.45, alpha * 0.22);
+    gl_FragColor = vec4(col * 0.55, alpha * 0.35);
   }
 `;
 
@@ -474,6 +480,7 @@ export class DeepVoidDriftScene implements ISpatialScene {
       fragmentShader: GALAXY_SMUDGE_FRAG,
       uniforms: {
         uTime: { value: 0 },
+        uFade: { value: 1.0 },
       },
       transparent: true,
       depthWrite: false,
@@ -614,14 +621,21 @@ export class DeepVoidDriftScene implements ISpatialScene {
     if (this.flareB) this.flareB.lookAt(this.camera.position);
     if (this.redGiantCoronaMesh) this.redGiantCoronaMesh.lookAt(this.camera.position);
 
-    // Recycle celestial landmarks smoothly as camera passes them
+    // Rare Distant Landmarks: 25-40s cadence (32s cycle)
+    // A breathtaking, softly lit tilted procedural spiral galaxy drifts gently through far background and disappears
+    const landmarkPeriod = 32.0;
+    const landmarkPhase = (elapsed % landmarkPeriod) / landmarkPeriod; // 0..1
+    const landmarkFade = Math.sin(landmarkPhase * Math.PI);
+
     if (this.galaxyMesh) {
       const gMat = this.galaxyMesh.material as THREE.ShaderMaterial;
       gMat.uniforms.uTime.value = elapsed;
-      if (this.galaxyMesh.position.z > this.camera.position.z + 40) {
-        this.galaxyMesh.position.z -= 420;
-        this.galaxyMesh.position.x = (Math.random() - 0.5) * 120;
-        this.galaxyMesh.position.y = (Math.random() - 0.5) * 80;
+      gMat.uniforms.uFade.value = landmarkFade;
+
+      this.galaxyMesh.rotation.z = 0.45 + elapsed * 0.008;
+
+      if (landmarkPhase < 0.03) {
+        this.galaxyMesh.position.z = this.camera.position.z - 220;
       }
     }
 

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
+import { GLSL_DITHER, GLSL_HASH, GLSL_TONEMAP_SHOULDER } from '../shaders/common';
 
 const NOCTURNE_VERTEX_SHADER = /* glsl */ `
   varying vec2 vUv;
@@ -16,28 +17,9 @@ const NOCTURNE_FRAGMENT_SHADER = /* glsl */ `
   uniform float uQuality;
   varying vec2 vUv;
 
-  float screenDither(vec2 fc) {
-    return fract(sin(dot(fc, vec2(12.9898, 78.233))) * 43758.5453) * 0.0039;
-  }
-
-  // Hash primitives
-  float hash21(vec2 p) {
-    p = fract(p * vec2(123.34, 456.21));
-    p += dot(p, p + 45.32);
-    return fract(p.x * p.y);
-  }
-
-  vec2 hash22(vec2 p) {
-    float n = sin(dot(p, vec2(41.0, 289.0)));
-    return fract(vec2(262144.0, 32768.0) * n);
-  }
-
-  float hash11(float p) {
-    p = fract(p * 0.1031);
-    p *= p + 33.33;
-    p *= p + p;
-    return fract(p);
-  }
+  ${GLSL_DITHER}
+  ${GLSL_HASH}
+  ${GLSL_TONEMAP_SHOULDER}
 
   float noise(vec2 p) {
     vec2 i = floor(p);

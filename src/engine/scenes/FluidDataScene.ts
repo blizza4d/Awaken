@@ -1,185 +1,113 @@
 import * as THREE from 'three';
 import { ISpatialScene, BloomPreset } from '../types';
-
-const MAX_INSTANCES = 110_000;
+import { GLSL_DITHER, GLSL_HASH, GLSL_TONEMAP_SHOULDER } from '../shaders/common';
 
 const FLUID_VERTEX_SHADER = /* glsl */ `
-  attribute vec4 aSeed;     // xyz: base flow coordinate, w: personal phase
-  attribute vec2 aStream;   // x: filament band [0..1], y: scale jitter
-
-  uniform float uTime;
-  uniform vec2 uOledDrift;
-  uniform vec2 uPointer;
-
-  varying vec3 vColor;
-  varying float vIntensity;
-  varying float vDepth;
-
-  // --- Ashima 3D Simplex Noise ---
-  vec4 permute(vec4 x) { return mod(((x * 34.0) + 1.0) * x, 289.0); }
-  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
-
-  float snoise(vec3 v) {
-    const vec2 C = vec2(1.0 / 6.0, 1.0 / 3.0);
-    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
-
-    vec3 i  = floor(v + dot(v, C.yyy));
-    vec3 x0 = v - i + dot(i, C.xxx);
-
-    vec3 g = step(x0.yzx, x0.xyz);
-    vec3 l = 1.0 - g;
-    vec3 i1 = min(g.xyz, l.zxy);
-    vec3 i2 = max(g.xyz, l.zxy);
-
-    vec3 x1 = x0 - i1 + C.xxx;
-    vec3 x2 = x0 - i2 + C.yyy;
-    vec3 x3 = x0 - D.yyy;
-
-    i = mod(i, 289.0);
-    vec4 p = permute(permute(permute(
-              i.z + vec4(0.0, i1.z, i2.z, 1.0))
-            + i.y + vec4(0.0, i1.y, i2.y, 1.0))
-            + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-
-    float n_ = 1.0 / 7.0;
-    vec3 ns = n_ * D.wyz - D.xzx;
-
-    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
-    vec4 x_ = floor(j * ns.z);
-    vec4 y_ = floor(j - 7.0 * x_);
-
-    vec4 x = x_ * ns.x + ns.yyyy;
-    vec4 y = y_ * ns.x + ns.yyyy;
-    vec4 h = 1.0 - abs(x) - abs(y);
-
-    vec4 b0 = vec4(x.xy, y.xy);
-    vec4 b1 = vec4(x.zw, y.zw);
-
-    vec4 s0 = floor(b0) * 2.0 + 1.0;
-    vec4 s1 = floor(b1) * 2.0 + 1.0;
-    vec4 sh = -step(h, vec4(0.0));
-
-    vec4 a0 = b0.xzyw + s0.xzyw * sh.xxyy;
-    vec4 a1 = b1.xzyw + s1.xzyw * sh.zzww;
-
-    vec3 p0 = vec3(a0.xy, h.x);
-    vec3 p1 = vec3(a0.zw, h.y);
-    vec3 p2 = vec3(a1.xy, h.z);
-    vec3 p3 = vec3(a1.zw, h.w);
-
-    vec4 norm = taylorInvSqrt(vec4(dot(p0, p0), dot(p1, p1), dot(p2, p2), dot(p3, p3)));
-    p0 *= norm.x;
-    p1 *= norm.y;
-    p2 *= norm.z;
-    p3 *= norm.w;
-
-    vec4 m = max(0.6 - vec4(dot(x0, x0), dot(x1, x1), dot(x2, x2), dot(x3, x3)), 0.0);
-    m = m * m;
-    return 42.0 * dot(m * m, vec4(dot(p0, x0), dot(p1, x1), dot(p2, x2), dot(p3, x3)));
-  }
-
-  // Divergence-free 3D Curl Noise via finite differences on 3 offset potential fields
-  vec3 curlNoise(vec3 p) {
-    const float e = 0.08;
-    vec3 dx = vec3(e, 0.0, 0.0);
-    vec3 dy = vec3(0.0, e, 0.0);
-    vec3 dz = vec3(0.0, 0.0, e);
-
-    float p_x0 = snoise(p - dx);
-    float p_x1 = snoise(p + dx);
-    float p_y0 = snoise(p - dy);
-    float p_y1 = snoise(p + dy);
-    float p_z0 = snoise(p - dz);
-    float p_z1 = snoise(p + dz);
-
-    float x = p_y1 - p_y0 - p_z1 + p_z0;
-    float y = p_z1 - p_z0 - p_x1 + p_x0;
-    float z = p_x1 - p_x0 - p_y1 + p_y0;
-
-    return normalize(vec3(x, y, z) + 1e-5);
-  }
-
+  varying vec2 vUv;
   void main() {
-    // Slower flow velocity for a hypnotic, calming ambient rhythm
-    float slowT = uTime * 0.075;
-    float phase = aSeed.w;
-
-    // Base fiber-optic ribbon flow along helical torus-manifold
-    float angle = aSeed.x + slowT * (0.35 + aStream.x * 0.28);
-    float ringR = 5.4 + aSeed.y * 2.8 + sin(angle * 2.0 + slowT) * 0.9;
-    float tubeAngle = aSeed.z + slowT * 0.55 + aStream.x * 6.28318;
-    float tubeR = 1.65 + sin(phase * 6.28318 + slowT * 1.2) * 0.9;
-
-    vec3 basePos = vec3(
-      (ringR + tubeR * cos(tubeAngle)) * cos(angle),
-      tubeR * sin(tubeAngle) * 1.35 + sin(angle * 3.0 - slowT) * 1.1,
-      (ringR + tubeR * cos(tubeAngle)) * sin(angle)
-    );
-
-    // Advect along GPU 3D Curl Noise field for silky bioluminescent fluid streams
-    vec3 flowSample = basePos * 0.20 + vec3(slowT * 0.35, -slowT * 0.24, slowT * 0.20);
-    vec3 curl1 = curlNoise(flowSample);
-    vec3 curl2 = curlNoise(flowSample * 1.85 + vec3(11.3, 4.7, -7.1) - slowT * 0.25);
-
-    vec3 displaced = basePos + curl1 * 2.2 + curl2 * 0.95;
-
-    // Gentle magnetic repulsion/attraction around user pointer
-    vec3 pointerWorld = vec3(uPointer.x * 9.0, uPointer.y * 5.0, 2.0);
-    vec3 toPtr = displaced - pointerWorld;
-    float ptrDist = length(toPtr);
-    displaced += normalize(toPtr + 1e-4) * exp(-ptrDist * 0.28) * 1.35;
-
-    // 10-minute OLED Burn-In Prevention Orbital Drift
-    displaced.xy += uOledDrift;
-
-    // Gentle pulse travelling along stream filaments
-    float pulse = 0.5 + 0.5 * sin(phase * 18.0 - uTime * 1.2 + aStream.x * 12.0);
-    float sparkle = pow(pulse, 4.0);
-
-    // Scale instanced micro-sphere subtly with fluid pulse
-    float particleScale = (0.42 + aStream.y * 0.65) * (0.75 + sparkle * 0.55);
-
-    // Color ramp: Deep Sapphire -> Muted Cyan -> Royal Violet -> Faint Gold threads
-    vec3 deepSapphire = vec3(0.06, 0.28, 0.85);
-    vec3 mutedCyan = vec3(0.08, 0.65, 0.78);
-    vec3 royalViolet = vec3(0.48, 0.14, 0.85);
-    vec3 faintGold = vec3(0.85, 0.62, 0.18);
-
-    float colorWave = fract(aStream.x + uTime * 0.024 + dot(curl1, vec3(0.25, 0.35, 0.2)) * 0.45);
-    vec3 col;
-    if (colorWave < 0.38) {
-      col = mix(deepSapphire, mutedCyan, smoothstep(0.0, 0.38, colorWave));
-    } else if (colorWave < 0.72) {
-      col = mix(mutedCyan, royalViolet, smoothstep(0.38, 0.72, colorWave));
-    } else {
-      col = mix(royalViolet, faintGold, smoothstep(0.72, 1.0, colorWave));
-    }
-
-    // Controlled luminance gain strictly on ribbon crests (never blows out to white)
-    float hdrGain = 0.30 + sparkle * 0.55;
-    vColor = col * hdrGain;
-    vIntensity = hdrGain;
-
-    vec3 transformed = position * particleScale + displaced;
-    vec4 mvPosition = modelViewMatrix * vec4(transformed, 1.0);
-    vDepth = -mvPosition.z;
-    gl_Position = projectionMatrix * mvPosition;
+    vUv = uv;
+    gl_Position = vec4(position.xy, 0.9999, 1.0);
   }
 `;
 
 const FLUID_FRAGMENT_SHADER = /* glsl */ `
-  varying vec3 vColor;
-  varying float vIntensity;
-  varying float vDepth;
+  uniform float uTime;
+  uniform vec2 uResolution;
+  uniform vec2 uPointer;
+  uniform vec2 uOledDrift;
+  uniform float uQuality;
+  varying vec2 vUv;
+
+  ${GLSL_DITHER}
+  ${GLSL_HASH}
+  ${GLSL_TONEMAP_SHOULDER}
+
+  // 2D Value Noise & Fractional Brownian Motion
+  float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(hash21(i + vec2(0.0, 0.0)), hash21(i + vec2(1.0, 0.0)), f.x),
+      mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), f.x),
+      f.y
+    );
+  }
+
+  // Multi-octave domain warping for liquid silk
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    mat2 rot = mat2(cos(0.52), sin(0.52), -sin(0.52), cos(0.52));
+    for (int i = 0; i < 5; i++) {
+      v += a * noise(p);
+      p = rot * p * 2.05 + vec2(1.35, 2.45);
+      a *= 0.48;
+    }
+    return v;
+  }
 
   void main() {
-    float fogFactor = smoothstep(36.0, 10.0, vDepth);
-    // Screen-space dither prevents banding on dark obsidian void
-    float dither = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 0.003;
-    // Soft HDR shoulder compression preserves rich ribbon saturation
-    vec3 col = vColor / (vec3(1.0) + vColor * 0.65);
-    vec3 finalCol = (col + dither) * fogFactor;
-    gl_FragColor = vec4(finalCol, 1.0);
+    vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / min(uResolution.x, uResolution.y);
+
+    // Subtle pointer interaction and continuous slow 10-minute OLED anti-burn-in drift
+    vec2 p = uv * 2.4 + uOledDrift + uPointer * 0.12;
+    float t = uTime * 0.065;
+
+    // Multi-octave domain warping: Layer 1
+    vec2 q = vec2(
+      fbm(p + vec2(0.0, 0.0) + vec2(t * 0.5, t * 0.4)),
+      fbm(p + vec2(5.2, 1.3) + vec2(-t * 0.35, t * 0.45))
+    );
+
+    // Multi-octave domain warping: Layer 2 (Flow Ribbon Fold)
+    vec2 r = vec2(
+      fbm(p + 3.8 * q + vec2(1.7, 9.2) + vec2(t * 0.3, -t * 0.25)),
+      fbm(p + 3.8 * q + vec2(8.3, 2.8) + vec2(-t * 0.22, t * 0.35))
+    );
+
+    // High-frequency silky caustic field
+    float f = fbm(p + 3.5 * r + vec2(sin(t * 0.8) * 0.2, cos(t * 0.6) * 0.2));
+
+    // Folding silk ribbon contours
+    float ribbon = pow(clamp(f * 1.8 - 0.35, 0.0, 1.0), 2.2);
+    float secondaryRibbon = pow(clamp(length(q) * 1.3 - 0.4, 0.0, 1.0), 2.8);
+
+    // Hairline caustic light edges along fold crests
+    float causticWave = abs(sin((f + r.x * 0.8) * 6.28318));
+    float causticEdge = pow(1.0 - causticWave, 18.0) * smoothstep(0.2, 0.8, ribbon);
+
+    // Translucent silk palette
+    // 1. Deep sapphire base (#0a2e8c)
+    vec3 sapphire = vec3(0.039, 0.180, 0.549);
+    // 2. Bioluminescent cyan highlights (#08b6d4)
+    vec3 cyan = vec3(0.031, 0.714, 0.831);
+    // 3. Royal violet interior body (#6d28d9)
+    vec3 violet = vec3(0.427, 0.157, 0.851);
+    // 4. Hairline warm gold caustic rim (#d99b26)
+    vec3 gold = vec3(0.851, 0.608, 0.149);
+
+    // Smooth volumetric blend through silk layers
+    vec3 silkColor = mix(sapphire, violet, clamp(r.x * 1.6, 0.0, 1.0));
+    silkColor = mix(silkColor, cyan, clamp(pow(r.y, 2.0) * 1.4, 0.0, 1.0));
+
+    // Combine ribbons with delicate gold caustics
+    vec3 finalColor = silkColor * (ribbon * 0.75 + secondaryRibbon * 0.45);
+    finalColor += gold * causticEdge * 0.85;
+
+    // Smooth vignette towards screen perimeter to maintain pitch-black (#000000) OLED edges
+    vec2 screenUV = gl_FragCoord.xy / uResolution.xy;
+    vec2 vigUV = screenUV - 0.5;
+    float vignette = clamp(1.0 - dot(vigUV, vigUV) * 1.8, 0.0, 1.0);
+    finalColor *= vignette;
+
+    // Soft HDR shoulder compression to prevent chalky white blowouts
+    finalColor = softHdrShoulder(finalColor, 0.45);
+
+    // Dither against 8-bit banding
+    finalColor += screenDither(gl_FragCoord.xy);
+
+    gl_FragColor = vec4(finalColor, 1.0);
   }
 `;
 
@@ -194,131 +122,93 @@ export class FluidDataScene implements ISpatialScene {
   };
   public readonly exposure = 0.76;
 
-  private mesh: THREE.InstancedMesh | null = null;
-  private geometry: THREE.BufferGeometry | null = null;
-  private material: THREE.ShaderMaterial | null = null;
-  private activeCount = MAX_INSTANCES;
+  private quadMesh: THREE.Mesh | null = null;
+  private quadGeo: THREE.PlaneGeometry | null = null;
+  private fluidMat: THREE.ShaderMaterial | null = null;
   private smoothPointer = new THREE.Vector2();
+  private qualityScale = 1.0;
+  private oledDrift = new THREE.Vector2();
 
   constructor() {
     this.scene = new THREE.Scene();
-    // Pitch-black pure OLED background
-    this.scene.background = new THREE.Color(0x000000);
-    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 120);
-    this.camera.position.set(0, 1.2, 17.5);
+    this.scene.background = new THREE.Color(0x000000); // True pitch black for OLED
+    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.camera.position.set(0, 0, 1);
   }
 
-  public init(_renderer: THREE.WebGLRenderer): void {
-    // Ultra-fine faceted micro-sphere geometry for 110k instanced fiber-optic beads
-    const baseGeo = new THREE.OctahedronGeometry(0.022, 0);
-    this.geometry = baseGeo;
+  public init(renderer: THREE.WebGLRenderer): void {
+    const size = renderer.getSize(new THREE.Vector2());
 
-    const seeds = new Float32Array(MAX_INSTANCES * 4);
-    const streams = new Float32Array(MAX_INSTANCES * 2);
-
-    // Group particles into 24 distinct fiber-optic fluid filaments
-    const filamentCount = 24;
-    for (let i = 0; i < MAX_INSTANCES; i++) {
-      const filament = (i % filamentCount) / filamentCount;
-      const tAlong = Math.random() * Math.PI * 2;
-      const radialSpread = (Math.random() - 0.5) * 1.4;
-      const tubeSpread = filament * Math.PI * 2 + (Math.random() - 0.5) * 0.45;
-
-      seeds[i * 4 + 0] = tAlong;
-      seeds[i * 4 + 1] = radialSpread;
-      seeds[i * 4 + 2] = tubeSpread;
-      seeds[i * 4 + 3] = Math.random();
-
-      streams[i * 2 + 0] = filament;
-      streams[i * 2 + 1] = Math.random();
-    }
-
-    this.geometry.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seeds, 4));
-    this.geometry.setAttribute('aStream', new THREE.InstancedBufferAttribute(streams, 2));
-
-    this.material = new THREE.ShaderMaterial({
+    this.quadGeo = new THREE.PlaneGeometry(2, 2);
+    this.fluidMat = new THREE.ShaderMaterial({
       vertexShader: FLUID_VERTEX_SHADER,
       fragmentShader: FLUID_FRAGMENT_SHADER,
       uniforms: {
         uTime: { value: 0 },
-        uOledDrift: { value: new THREE.Vector2(0, 0) },
+        uResolution: { value: new THREE.Vector2(size.x, size.y) },
         uPointer: { value: new THREE.Vector2(0, 0) },
+        uOledDrift: { value: new THREE.Vector2(0, 0) },
+        uQuality: { value: 1.0 },
       },
-      transparent: false,
-      depthWrite: true,
-      blending: THREE.NormalBlending,
+      depthWrite: false,
+      depthTest: false,
     });
 
-    this.mesh = new THREE.InstancedMesh(this.geometry, this.material, MAX_INSTANCES);
-    this.mesh.frustumCulled = false;
-
-    // Identity matrices (all world transforms are computed directly on GPU)
-    const identity = new THREE.Matrix4();
-    for (let i = 0; i < MAX_INSTANCES; i++) {
-      this.mesh.setMatrixAt(i, identity);
-    }
-    this.mesh.instanceMatrix.needsUpdate = true;
-
-    this.scene.add(this.mesh);
+    this.quadMesh = new THREE.Mesh(this.quadGeo, this.fluidMat);
+    this.quadMesh.frustumCulled = false;
+    this.scene.add(this.quadMesh);
   }
 
   public update(delta: number, elapsed: number, pointer: THREE.Vector2): void {
-    if (!this.material) return;
+    this.smoothPointer.lerp(pointer, Math.min(1, delta * 2.5));
 
-    this.smoothPointer.lerp(pointer, Math.min(1, delta * 3.5));
+    // Slow 10-minute anti-burn-in Lissajous orbit (drift radius ~ 0.45)
+    const oledT = elapsed * 0.0105;
+    this.oledDrift.set(
+      Math.sin(oledT * 3.0) * 0.42 + Math.cos(oledT * 1.5) * 0.15,
+      Math.cos(oledT * 2.0) * 0.38 + Math.sin(oledT * 4.0) * 0.12
+    );
 
-    // 10-minute (600s) Lissajous orbital drift for OLED burn-in prevention
-    const tenMinCycle = (elapsed / 600.0) * Math.PI * 2;
-    const oledX = Math.sin(tenMinCycle) * 3.4;
-    const oledY = Math.cos(tenMinCycle * 1.333) * 1.8;
-
-    this.material.uniforms.uTime.value = elapsed;
-    this.material.uniforms.uOledDrift.value.set(oledX, oledY);
-    this.material.uniforms.uPointer.value.copy(this.smoothPointer);
-
-    // Cinematic multi-harmonic organic camera wander
-    const camAngle = elapsed * 0.042;
-    const wanderX =
-      Math.sin(camAngle) * 3.8 + Math.sin(elapsed * 0.083 + 1.4) * 0.95 + this.smoothPointer.x * 2.2;
-    const wanderY =
-      Math.cos(camAngle * 0.7) * 1.8 + Math.sin(elapsed * 0.061 + 2.7) * 0.85 + this.smoothPointer.y * 1.5;
-    const wanderZ = 16.8 + Math.sin(elapsed * 0.078) * 1.4 + Math.cos(elapsed * 0.035) * 0.8;
-
-    this.camera.position.set(wanderX, wanderY, wanderZ);
-    this.camera.lookAt(oledX * 0.35, oledY * 0.35, 0);
-    this.camera.rotation.z = Math.sin(elapsed * 0.027) * 0.025;
+    if (this.fluidMat) {
+      this.fluidMat.uniforms.uTime.value = elapsed;
+      this.fluidMat.uniforms.uPointer.value.copy(this.smoothPointer);
+      this.fluidMat.uniforms.uOledDrift.value.copy(this.oledDrift);
+      this.fluidMat.uniforms.uQuality.value = this.qualityScale;
+    }
   }
 
   public resize(width: number, height: number): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+
+    if (this.fluidMat) {
+      this.fluidMat.uniforms.uResolution.value.set(width, height);
+    }
   }
 
   public setQuality(scale: number): void {
-    const clamped = Math.max(0.32, Math.min(1.0, scale));
-    this.activeCount = Math.floor(MAX_INSTANCES * clamped);
-    if (this.mesh) {
-      this.mesh.count = this.activeCount;
+    this.qualityScale = Math.max(0.4, Math.min(1.0, scale));
+    if (this.fluidMat) {
+      this.fluidMat.uniforms.uQuality.value = this.qualityScale;
     }
   }
 
   public getActiveInstanceCount(): number {
-    return this.activeCount;
+    return 1;
   }
 
   public dispose(): void {
-    if (this.mesh) {
-      this.scene.remove(this.mesh);
-      this.mesh.dispose();
-      this.mesh = null;
+    if (this.quadMesh) {
+      this.scene.remove(this.quadMesh);
+      this.quadMesh = null;
     }
-    if (this.geometry) {
-      this.geometry.dispose();
-      this.geometry = null;
+    if (this.quadGeo) {
+      this.quadGeo.dispose();
+      this.quadGeo = null;
     }
-    if (this.material) {
-      this.material.dispose();
-      this.material = null;
+    if (this.fluidMat) {
+      this.fluidMat.dispose();
+      this.fluidMat = null;
     }
     this.scene.clear();
   }

@@ -194,7 +194,7 @@ export const DynamicIsland: React.FC = () => {
                   maskImage: 'linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent)',
                   WebkitMaskImage: 'linear-gradient(to right, transparent, black 14px, black calc(100% - 14px), transparent)',
                 }}
-                className="hidden md:flex items-center px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 max-w-[36vw] lg:max-w-[46vw] xl:max-w-[56vw] 2xl:max-w-[66vw] overflow-x-auto scrollbar-none flex-nowrap scroll-smooth"
+                className="hidden md:flex items-center px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 max-w-[30vw] lg:max-w-[38vw] xl:max-w-[44vw] 2xl:max-w-[54vw] overflow-x-auto scrollbar-none flex-nowrap scroll-smooth"
               >
                 {SPATIAL_SCENES.map((s) => {
                   const selected = s.id === activeScene;

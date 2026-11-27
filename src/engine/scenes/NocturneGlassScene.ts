@@ -245,6 +245,7 @@ export class NocturneGlassScene implements ISpatialScene {
   public readonly id = 'nocturne-glass' as const;
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
+  public readonly isFullScreenShader = true;
   public readonly bloomPreset: BloomPreset = {
     strength: 0.26,
     radius: 0.45,

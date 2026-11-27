@@ -255,6 +255,7 @@ export class ArcticAuroraScene implements ISpatialScene {
   public readonly id = 'arctic-aurora' as const;
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
+  public readonly isFullScreenShader = true;
   public readonly bloomPreset: BloomPreset = {
     strength: 0.30,
     radius: 0.48,

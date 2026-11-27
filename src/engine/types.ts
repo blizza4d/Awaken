@@ -15,6 +15,8 @@ export type SpatialSceneId =
   | 'abyssal-drift'
   | 'oled-void';
 
+export type PowerProfile = 'eco' | 'smooth' | 'native';
+
 export interface BloomPreset {
   strength: number;
   radius: number;
@@ -64,6 +66,7 @@ export interface ISpatialScene {
   readonly camera: THREE.PerspectiveCamera;
   readonly bloomPreset: BloomPreset;
   readonly exposure: number;
+  readonly isFullScreenShader?: boolean;
   init(renderer: THREE.WebGLRenderer): void;
   update(delta: number, elapsed: number, pointer: THREE.Vector2): void;
   resize(width: number, height: number): void;

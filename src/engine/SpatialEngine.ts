@@ -7,24 +7,32 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 
 import { CinematicPostShader } from './shaders/CinematicPostShader';
-import { FluidDataScene } from './scenes/FluidDataScene';
-import { VolumetricMegacityScene } from './scenes/VolumetricMegacityScene';
-import { EventHorizonScene } from './scenes/EventHorizonScene';
-import { CarinaNebulaScene } from './scenes/CarinaNebulaScene';
-import { BinaryPulsarScene } from './scenes/BinaryPulsarScene';
-import { SaturnianOrbitScene } from './scenes/SaturnianOrbitScene';
-import { DeepVoidDriftScene } from './scenes/DeepVoidDriftScene';
-import { MidnightCruiseScene } from './scenes/MidnightCruiseScene';
-import { MoonlitShoreScene } from './scenes/MoonlitShoreScene';
-import { ArcticAuroraScene } from './scenes/ArcticAuroraScene';
-import { NocturneGlassScene } from './scenes/NocturneGlassScene';
-import { AbyssalDriftScene } from './scenes/AbyssalDriftScene';
 import {
   ISpatialScene,
   SpatialSceneId,
   EngineTelemetry,
   PostFXSettings,
+  PowerProfile,
 } from './types';
+
+type SceneClassConstructor = new () => ISpatialScene;
+type SceneLoader = () => Promise<SceneClassConstructor>;
+
+const SCENE_LOADERS: Record<SpatialSceneId, SceneLoader | null> = {
+  'fluid-data': async () => (await import('./scenes/FluidDataScene')).FluidDataScene,
+  'volumetric-megacity': async () => (await import('./scenes/VolumetricMegacityScene')).VolumetricMegacityScene,
+  'event-horizon': async () => (await import('./scenes/EventHorizonScene')).EventHorizonScene,
+  'carina-nebula': async () => (await import('./scenes/CarinaNebulaScene')).CarinaNebulaScene,
+  'binary-pulsar': async () => (await import('./scenes/BinaryPulsarScene')).BinaryPulsarScene,
+  'saturnian-orbit': async () => (await import('./scenes/SaturnianOrbitScene')).SaturnianOrbitScene,
+  'deep-void-drift': async () => (await import('./scenes/DeepVoidDriftScene')).DeepVoidDriftScene,
+  'midnight-cruise': async () => (await import('./scenes/MidnightCruiseScene')).MidnightCruiseScene,
+  'moonlit-shore': async () => (await import('./scenes/MoonlitShoreScene')).MoonlitShoreScene,
+  'arctic-aurora': async () => (await import('./scenes/ArcticAuroraScene')).ArcticAuroraScene,
+  'nocturne-glass': async () => (await import('./scenes/NocturneGlassScene')).NocturneGlassScene,
+  'abyssal-drift': async () => (await import('./scenes/AbyssalDriftScene')).AbyssalDriftScene,
+  'oled-void': null,
+};
 
 export class SpatialEngine {
   private renderer: THREE.WebGLRenderer;
@@ -37,6 +45,7 @@ export class SpatialEngine {
 
   private activeScene: ISpatialScene | null = null;
   private activeSceneId: SpatialSceneId;
+  private loadSequence = 0;
   private animFrameId: number | null = null;
   private clock = new THREE.Clock();
   private elapsed = 0;
@@ -55,6 +64,11 @@ export class SpatialEngine {
   private highFpsStreak = 0;
   private isPaused = false;
   private isOledVoidActive = false;
+
+  // Power Profile & FPS Limiter
+  private powerProfile: PowerProfile = 'smooth';
+  private targetFrameInterval = 1000 / 60; // 16.66ms for 60fps
+  private lastRenderTimestamp = 0;
 
   private postFX: PostFXSettings = {
     bloomMultiplier: 1.0,
@@ -87,8 +101,16 @@ export class SpatialEngine {
     this.renderer.toneMappingExposure = 0.80;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    // 2. Reusable EffectComposer Pipeline
-    this.composer = new EffectComposer(this.renderer);
+    // 2. Bandwidth-efficient HalfFloat EffectComposer Pipeline
+    const renderTarget = new THREE.WebGLRenderTarget(this.width, this.height, {
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+      colorSpace: THREE.SRGBColorSpace,
+      stencilBuffer: false,
+      depthBuffer: true,
+    });
+
+    this.composer = new EffectComposer(this.renderer, renderTarget);
     this.composer.setPixelRatio(this.currentDpr);
     this.composer.setSize(this.width, this.height);
 
@@ -99,9 +121,9 @@ export class SpatialEngine {
     this.renderPass = new RenderPass(bootScene, bootCam);
     this.composer.addPass(this.renderPass);
 
-    // Pass 2: Localized UnrealBloomPass
+    // Pass 2: Half-Resolution UnrealBloomPass for low GPU fillrate & cache efficiency
     this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(this.width, this.height),
+      new THREE.Vector2(Math.floor(this.width * 0.5), Math.floor(this.height * 0.5)),
       0.32,
       0.48,
       0.88
@@ -128,50 +150,29 @@ export class SpatialEngine {
     window.addEventListener('pointermove', this.handlePointerMove, { passive: true });
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
 
-    // Initialize initial scene or OLED Void
+    // Initialize initial scene
     this.loadScene(initialScene);
   }
 
-  private instantiateScene(id: SpatialSceneId): ISpatialScene | null {
-    switch (id) {
-      case 'fluid-data':
-        return new FluidDataScene();
-      case 'volumetric-megacity':
-        return new VolumetricMegacityScene();
-      case 'event-horizon':
-        return new EventHorizonScene();
-      case 'carina-nebula':
-        return new CarinaNebulaScene();
-      case 'binary-pulsar':
-        return new BinaryPulsarScene();
-      case 'saturnian-orbit':
-        return new SaturnianOrbitScene();
-      case 'deep-void-drift':
-        return new DeepVoidDriftScene();
-      case 'midnight-cruise':
-        return new MidnightCruiseScene();
-      case 'moonlit-shore':
-        return new MoonlitShoreScene();
-      case 'arctic-aurora':
-        return new ArcticAuroraScene();
-      case 'nocturne-glass':
-        return new NocturneGlassScene();
-      case 'abyssal-drift':
-        return new AbyssalDriftScene();
-      case 'oled-void':
-        return null;
-      default:
-        return new FluidDataScene();
+  public setPowerProfile(profile: PowerProfile): void {
+    this.powerProfile = profile;
+    if (profile === 'eco') {
+      this.targetFrameInterval = 1000 / 30; // 30 FPS target
+    } else if (profile === 'smooth') {
+      this.targetFrameInterval = 1000 / 60; // 60 FPS target
+    } else {
+      this.targetFrameInterval = 0; // Uncapped native refresh
     }
   }
 
   /**
-   * Switches scenes with strict WebGL garbage collection:
-   * Completely disposes geometries, materials, textures, and flushes renderer lists.
-   * If switching to 'oled-void', completely tears down WebGL processing for 0% GPU.
+   * Lazily loads and switches spatial scenes with strict WebGL garbage collection:
+   * Dynamically imports the scene chunk, completely disposes old resources,
+   * flushes renderer lists, and configures the direct or composer rendering pipeline.
    */
-  public loadScene(id: SpatialSceneId): void {
+  public async loadScene(id: SpatialSceneId): Promise<void> {
     this.activeSceneId = id;
+    const currentSeq = ++this.loadSequence;
 
     // 1. Strict GPU Memory Flush of previous scene
     if (this.activeScene) {
@@ -202,33 +203,45 @@ export class SpatialEngine {
       return;
     }
 
-    // 3. Resume from OLED Void if active
+    // 3. Resume from OLED Void if previously active
     if (this.isOledVoidActive) {
       this.isOledVoidActive = false;
       this.start();
     }
 
-    // 4. Instantiate and initialize new WebGL spatial scene
-    const nextScene = this.instantiateScene(id);
-    if (!nextScene) return;
+    // 4. Lazy asynchronous scene load
+    const loader = SCENE_LOADERS[id];
+    if (!loader) return;
 
-    nextScene.init(this.renderer);
-    nextScene.resize(this.width, this.height);
-    nextScene.setQuality(this.qualityScale);
-    this.activeScene = nextScene;
+    try {
+      const SceneClass = await loader();
 
-    // 5. Rewire EffectComposer passes & per-scene color grading / bloom tuning
-    this.renderPass.scene = nextScene.scene;
-    this.renderPass.camera = nextScene.camera;
-    this.renderer.toneMappingExposure = nextScene.exposure;
-    this.applyPostFXUniforms();
+      // Race-condition guard: check if user switched scenes while downloading
+      if (this.loadSequence !== currentSeq) {
+        return;
+      }
 
-    // Reset clock delta for smooth scene arrival
-    this.clock.getDelta();
+      const nextScene = new SceneClass();
+      nextScene.init(this.renderer);
+      nextScene.resize(this.width, this.height);
+      nextScene.setQuality(this.qualityScale);
+      this.activeScene = nextScene;
 
-    // Ensure loop is running
-    if (this.animFrameId === null) {
-      this.start();
+      // 5. Rewire passes & per-scene exposure/bloom
+      this.renderPass.scene = nextScene.scene;
+      this.renderPass.camera = nextScene.camera;
+      this.renderer.toneMappingExposure = nextScene.exposure;
+      this.applyPostFXUniforms();
+
+      // Reset clock delta for smooth scene arrival
+      this.clock.getDelta();
+
+      // Ensure animation loop is running
+      if (this.animFrameId === null) {
+        this.start();
+      }
+    } catch (err) {
+      console.error(`Failed to lazily load spatial scene '${id}':`, err);
     }
   }
 
@@ -261,6 +274,7 @@ export class SpatialEngine {
       this.renderer.setPixelRatio(this.currentDpr);
       this.composer.setPixelRatio(this.currentDpr);
       this.composer.setSize(this.width, this.height);
+      this.bloomPass.setSize(Math.floor(this.width * 0.5), Math.floor(this.height * 0.5));
       this.smaaPass.setSize(
         Math.floor(this.width * this.currentDpr),
         Math.floor(this.height * this.currentDpr)
@@ -276,7 +290,7 @@ export class SpatialEngine {
   private runPerformanceGovernor(now: number): void {
     this.frameCounter++;
     const dtMs = now - this.lastFpsSample;
-    if (dtMs < 1000) return;
+    if (dtMs < 1000) return; // Strict 1 Hz throttling
 
     this.currentFps = Math.round((this.frameCounter * 1000) / dtMs);
     this.frameCounter = 0;
@@ -318,20 +332,37 @@ export class SpatialEngine {
     }
   }
 
-  private tick = (): void => {
+  private tick = (timestamp?: number): void => {
     if (this.isOledVoidActive) return;
 
     this.animFrameId = requestAnimationFrame(this.tick);
     if (this.isPaused || !this.activeScene) return;
 
+    const now = timestamp || performance.now();
+
+    // Frame-rate throttle according to active power profile
+    if (this.targetFrameInterval > 0) {
+      const elapsedSinceLastRender = now - this.lastRenderTimestamp;
+      if (elapsedSinceLastRender < this.targetFrameInterval - 1.2) {
+        return;
+      }
+    }
+    this.lastRenderTimestamp = now;
+
     const delta = Math.min(this.clock.getDelta(), 0.05);
     this.elapsed += delta;
 
     this.activeScene.update(delta, this.elapsed, this.pointer);
-    this.cinematicPass.uniforms.uTime.value = this.elapsed;
 
-    this.composer.render();
-    this.runPerformanceGovernor(performance.now());
+    // Direct render bypass for full-screen GLSL scenes (saves 4-6 full-screen passes)
+    if (this.activeScene.isFullScreenShader) {
+      this.renderer.render(this.activeScene.scene, this.activeScene.camera);
+    } else {
+      this.cinematicPass.uniforms.uTime.value = this.elapsed;
+      this.composer.render();
+    }
+
+    this.runPerformanceGovernor(now);
   };
 
   public start(): void {
@@ -369,7 +400,7 @@ export class SpatialEngine {
 
     this.composer.setPixelRatio(this.currentDpr);
     this.composer.setSize(this.width, this.height);
-    this.bloomPass.setSize(this.width, this.height);
+    this.bloomPass.setSize(Math.floor(this.width * 0.5), Math.floor(this.height * 0.5));
     this.smaaPass.setSize(
       Math.floor(this.width * this.currentDpr),
       Math.floor(this.height * this.currentDpr)

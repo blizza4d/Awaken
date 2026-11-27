@@ -8,35 +8,66 @@ export const SpatialCanvas: React.FC = () => {
 
   const activeScene = useSpatialStore((s) => s.activeScene);
   const postFX = useSpatialStore((s) => s.postFX);
+  const powerProfile = useSpatialStore((s) => s.powerProfile);
   const brightness = useSpatialStore((s) => s.brightness);
   const setTelemetry = useSpatialStore((s) => s.setTelemetry);
 
-  // Mount Three.js + EffectComposer SpatialEngine once
+  // Lazy WebGL Engine lifecycle:
+  // When booting straight into OLED Void, Three.js & EffectComposer are never initialized (0% GPU).
+  // SpatialEngine is created only once the user transitions into a real WebGL spatial mode.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const engine = new SpatialEngine(canvas, useSpatialStore.getState().activeScene, (telemetry) => {
-      setTelemetry(telemetry);
-    });
-    engine.updatePostFX(useSpatialStore.getState().postFX);
-    engineRef.current = engine;
+    if (activeScene === 'oled-void') {
+      if (engineRef.current) {
+        engineRef.current.loadScene('oled-void');
+      } else {
+        setTelemetry({
+          fps: 0,
+          pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
+          qualityScale: 1.0,
+          activeInstances: 0,
+          drawCalls: 0,
+          triangles: 0,
+          geometries: 0,
+          textures: 0,
+          sceneId: 'oled-void',
+          isOledVoid: true,
+        });
+      }
+      return;
+    }
 
-    return () => {
-      engine.destroy();
-      engineRef.current = null;
-    };
-  }, [setTelemetry]);
+    if (!engineRef.current) {
+      const engine = new SpatialEngine(canvas, activeScene, (telemetry) => {
+        setTelemetry(telemetry);
+      });
+      engine.setPowerProfile(powerProfile);
+      engine.updatePostFX(postFX);
+      engineRef.current = engine;
+    } else {
+      engineRef.current.loadScene(activeScene);
+    }
+  }, [activeScene, setTelemetry]);
 
-  // Switch active WebGL environment with strict dispose() + memory flush
+  // Propagate real-time Power Profile changes
   useEffect(() => {
-    engineRef.current?.loadScene(activeScene);
-  }, [activeScene]);
+    engineRef.current?.setPowerProfile(powerProfile);
+  }, [powerProfile]);
 
   // Propagate real-time Post-FX and Dynamic Resolution Governor updates
   useEffect(() => {
     engineRef.current?.updatePostFX(postFX);
   }, [postFX]);
+
+  // Destroy engine on unmount
+  useEffect(() => {
+    return () => {
+      engineRef.current?.destroy();
+      engineRef.current = null;
+    };
+  }, []);
 
   const dimOpacity = Math.max(0, Math.min(0.82, (100 - brightness) / 100));
 

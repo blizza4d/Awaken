@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { SpatialSceneId, EngineTelemetry, PostFXSettings } from '../engine/types';
+import { SpatialSceneId, EngineTelemetry, PostFXSettings, PowerProfile } from '../engine/types';
 
 const STORAGE_KEY = 'awaken_spatial_v5';
 
@@ -12,6 +12,7 @@ interface PersistedPrefs {
   wakeLockPreferred: boolean;
   strictNoHud: boolean;
   oledClockOpacity: number;
+  powerProfile: PowerProfile;
 }
 
 const defaultPrefs: PersistedPrefs = {
@@ -28,6 +29,7 @@ const defaultPrefs: PersistedPrefs = {
   wakeLockPreferred: true,
   strictNoHud: false,
   oledClockOpacity: 0.30,
+  powerProfile: 'smooth',
 };
 
 const ALL_SCENE_IDS: SpatialSceneId[] = [
@@ -46,6 +48,8 @@ const ALL_SCENE_IDS: SpatialSceneId[] = [
   'oled-void',
 ];
 
+const ALL_POWER_PROFILES: PowerProfile[] = ['eco', 'smooth', 'native'];
+
 function loadPrefs(): PersistedPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -57,6 +61,9 @@ function loadPrefs(): PersistedPrefs {
         activeScene: ALL_SCENE_IDS.includes(parsed.activeScene)
           ? parsed.activeScene
           : defaultPrefs.activeScene,
+        powerProfile: ALL_POWER_PROFILES.includes(parsed.powerProfile)
+          ? parsed.powerProfile
+          : defaultPrefs.powerProfile,
         postFX: {
           ...defaultPrefs.postFX,
           ...(parsed.postFX || {}),
@@ -106,6 +113,7 @@ export interface SpatialState extends PersistedPrefs {
   setNoHudRevealed: (revealed: boolean) => void;
   setStrictNoHud: (strict: boolean) => void;
   setOledClockOpacity: (opacity: number) => void;
+  setPowerProfile: (profile: PowerProfile) => void;
 }
 
 const initial = loadPrefs();
@@ -120,6 +128,7 @@ function persistFromState(s: SpatialState): void {
     wakeLockPreferred: s.wakeLockPreferred,
     strictNoHud: s.strictNoHud,
     oledClockOpacity: s.oledClockOpacity,
+    powerProfile: s.powerProfile,
   });
 }
 
@@ -217,6 +226,10 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
   setOledClockOpacity: (oledClockOpacity) => {
     const clamped = Math.max(0.1, Math.min(1.0, oledClockOpacity));
     set({ oledClockOpacity: clamped });
+    persistFromState(get());
+  },
+  setPowerProfile: (powerProfile) => {
+    set({ powerProfile });
     persistFromState(get());
   },
 }));

@@ -115,6 +115,7 @@ export class FluidDataScene implements ISpatialScene {
   public readonly id = 'fluid-data' as const;
   public readonly scene: THREE.Scene;
   public readonly camera: THREE.PerspectiveCamera;
+  public readonly isFullScreenShader = true;
   public readonly bloomPreset: BloomPreset = {
     strength: 0.28,
     radius: 0.45,

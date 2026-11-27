@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSpatialStore } from '../../store/useSpatialStore';
-import { Sliders, Cpu, Sparkles, Clock, Sun, X, Gauge, EyeOff } from 'lucide-react';
+import { Sliders, Cpu, Sparkles, Clock, Sun, X, Gauge, EyeOff, Zap } from 'lucide-react';
 
 export const SpatialSettingsPopover: React.FC = () => {
   const {
@@ -20,6 +20,8 @@ export const SpatialSettingsPopover: React.FC = () => {
     setStrictNoHud,
     oledClockOpacity,
     setOledClockOpacity,
+    powerProfile,
+    setPowerProfile,
     activeScene,
   } = useSpatialStore();
 
@@ -124,7 +126,58 @@ export const SpatialSettingsPopover: React.FC = () => {
             <div className="pt-3 border-t border-white/10 space-y-3">
               <div className="flex items-center gap-1.5 spatial-micro text-violet-300 font-semibold">
                 <Gauge className="w-3.5 h-3.5" />
-                <span>Hardware Governor & Display</span>
+                <span>Hardware Governor &amp; Display</span>
+              </div>
+
+              {/* Power Profile / FPS Limiter */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between font-mono text-[11px]">
+                  <span className="text-slate-300 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-cyan-300" /> Power Profile / FPS Target
+                  </span>
+                  <span className="text-white font-semibold uppercase">
+                    {powerProfile === 'eco'
+                      ? 'Eco 30 FPS'
+                      : powerProfile === 'smooth'
+                      ? 'Smooth 60 FPS'
+                      : 'Native Uncapped'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 p-1 bg-white/5 rounded-2xl border border-white/10 font-mono text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setPowerProfile('eco')}
+                    className={`py-1.5 rounded-xl font-medium transition-all cursor-pointer text-center ${
+                      powerProfile === 'eco'
+                        ? 'bg-emerald-500/25 border border-emerald-400/50 text-emerald-200 shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    Eco 30 FPS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPowerProfile('smooth')}
+                    className={`py-1.5 rounded-xl font-medium transition-all cursor-pointer text-center ${
+                      powerProfile === 'smooth'
+                        ? 'bg-cyan-500/25 border border-cyan-400/50 text-cyan-200 shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    Smooth 60 FPS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPowerProfile('native')}
+                    className={`py-1.5 rounded-xl font-medium transition-all cursor-pointer text-center ${
+                      powerProfile === 'native'
+                        ? 'bg-violet-500/25 border border-violet-400/50 text-violet-200 shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    Native Uncapped
+                  </button>
+                </div>
               </div>
 
               <label className="flex items-center justify-between cursor-pointer">

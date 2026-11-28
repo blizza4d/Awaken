@@ -8,6 +8,9 @@ import { DynamicIsland } from './components/spatial/DynamicIsland';
 import { SpatialSettingsPopover } from './components/spatial/SpatialSettingsPopover';
 import { SpatialClockOverlay } from './components/spatial/SpatialClockOverlay';
 import { OledVoidView } from './components/spatial/OledVoidView';
+import { KeyboardShortcutsModal } from './components/spatial/KeyboardShortcutsModal';
+import { useCinemaTour } from './hooks/useCinemaTour';
+import { useGlobalKeyboardShortcuts } from './hooks/useGlobalKeyboardShortcuts';
 import { Sparkles, Radio, Eye } from 'lucide-react';
 
 type SpaceCategory = 'all' | 'space' | 'atmosphere' | 'urban' | 'abstract';
@@ -51,6 +54,12 @@ export const App: React.FC = () => {
   const [cursorHidden, setCursorHidden] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<SpaceCategory>('all');
   const revealTimerRef = useRef<number | null>(null);
+
+  // Activate Cinema Tour playlist & OLED Sleep Timer
+  useCinemaTour();
+
+  // Activate global keyboard navigation (Arrows, Space, F, H, M, O, ?)
+  useGlobalKeyboardShortcuts();
 
   const filteredScenes = selectedCategory === 'all'
     ? SPATIAL_SCENES
@@ -386,6 +395,9 @@ export const App: React.FC = () => {
 
       {/* 7. Auto-Collapsing Floating Dynamic Island */}
       <DynamicIsland />
+
+      {/* 8. Desktop Keyboard Command Sheet Modal */}
+      <KeyboardShortcutsModal />
     </div>
   );
 };

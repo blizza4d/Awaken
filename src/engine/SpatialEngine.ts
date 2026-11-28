@@ -50,7 +50,14 @@ export class SpatialEngine {
   private clock = new THREE.Clock();
   private elapsed = 0;
 
+  // Pointer Micro-Parallax & Relaxation
   private pointer = new THREE.Vector2(0, 0);
+  private targetPointer = new THREE.Vector2(0, 0);
+  private lastPointerMoveTime = performance.now();
+  private subtleParallax = true;
+  private motionSpeed = 1.0;
+  private ambientDimmer = 1.0;
+
   private width = window.innerWidth;
   private height = window.innerHeight;
 
@@ -165,6 +172,25 @@ export class SpatialEngine {
     }
   }
 
+  public setMotionSpeed(speed: number): void {
+    this.motionSpeed = Math.max(0.25, Math.min(2.0, speed));
+  }
+
+  public setAmbientDimmer(dimmer: number): void {
+    this.ambientDimmer = Math.max(0.40, Math.min(1.20, dimmer));
+    if (this.activeScene) {
+      this.renderer.toneMappingExposure = this.activeScene.exposure * this.ambientDimmer;
+    }
+  }
+
+  public setSubtleParallax(enabled: boolean): void {
+    this.subtleParallax = enabled;
+    if (!enabled) {
+      this.targetPointer.set(0, 0);
+      this.pointer.set(0, 0);
+    }
+  }
+
   /**
    * Lazily loads and switches spatial scenes with strict WebGL garbage collection:
    * Dynamically imports the scene chunk, completely disposes old resources,
@@ -227,10 +253,10 @@ export class SpatialEngine {
       nextScene.setQuality(this.qualityScale);
       this.activeScene = nextScene;
 
-      // 5. Rewire passes & per-scene exposure/bloom
+      // 5. Rewire passes & per-scene exposure/bloom with ambient dimmer multiplier
       this.renderPass.scene = nextScene.scene;
       this.renderPass.camera = nextScene.camera;
-      this.renderer.toneMappingExposure = nextScene.exposure;
+      this.renderer.toneMappingExposure = nextScene.exposure * this.ambientDimmer;
       this.applyPostFXUniforms();
 
       // Reset clock delta for smooth scene arrival
@@ -349,7 +375,16 @@ export class SpatialEngine {
     }
     this.lastRenderTimestamp = now;
 
-    const delta = Math.min(this.clock.getDelta(), 0.05);
+    // Organic Pointer Micro-Parallax:
+    // Smoothly relax back to center (0, 0) after 3.0s of mouse inactivity
+    if (!this.subtleParallax || now - this.lastPointerMoveTime > 3000) {
+      this.targetPointer.set(0, 0);
+    }
+    // Heavy exponential damping (~0.035) for smooth cinematic motion
+    this.pointer.lerp(this.targetPointer, 0.035);
+
+    // Delta time scaled by motionSpeed
+    const delta = Math.min(this.clock.getDelta(), 0.05) * this.motionSpeed;
     this.elapsed += delta;
 
     this.activeScene.update(delta, this.elapsed, this.pointer);
@@ -410,8 +445,13 @@ export class SpatialEngine {
   };
 
   private handlePointerMove = (e: PointerEvent): void => {
-    this.pointer.x = (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
-    this.pointer.y = -(e.clientY / Math.max(1, window.innerHeight)) * 2 + 1;
+    this.lastPointerMoveTime = performance.now();
+    if (!this.subtleParallax) {
+      this.targetPointer.set(0, 0);
+      return;
+    }
+    this.targetPointer.x = (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
+    this.targetPointer.y = -(e.clientY / Math.max(1, window.innerHeight)) * 2 + 1;
   };
 
   private handleVisibilityChange = (): void => {

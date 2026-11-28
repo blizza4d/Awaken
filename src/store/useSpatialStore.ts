@@ -1,7 +1,16 @@
 import { create } from 'zustand';
-import { SpatialSceneId, EngineTelemetry, PostFXSettings, PowerProfile } from '../engine/types';
+import {
+  SpatialSceneId,
+  EngineTelemetry,
+  PostFXSettings,
+  PowerProfile,
+  ClockTheme,
+  AutoCycleInterval,
+  SleepTimerDuration,
+  FocusModeType,
+} from '../engine/types';
 
-const STORAGE_KEY = 'awaken_spatial_v5';
+const STORAGE_KEY = 'awaken_spatial_v6';
 
 interface PersistedPrefs {
   activeScene: SpatialSceneId;
@@ -13,24 +22,21 @@ interface PersistedPrefs {
   strictNoHud: boolean;
   oledClockOpacity: number;
   powerProfile: PowerProfile;
+  audioEnabled: boolean;
+  audioVolume: number;
+  autoCycleInterval: AutoCycleInterval;
+  autoCycleFavoritesOnly: boolean;
+  autoCycleShuffle: boolean;
+  favoriteScenes: SpatialSceneId[];
+  sleepTimer: SleepTimerDuration;
+  clockTheme: ClockTheme;
+  clockShowDate: boolean;
+  clockShowSeconds: boolean;
+  clockOpacity: number;
+  motionSpeed: number;
+  ambientDimmer: number;
+  subtleParallax: boolean;
 }
-
-const defaultPrefs: PersistedPrefs = {
-  activeScene: 'event-horizon',
-  postFX: {
-    bloomMultiplier: 1.0,
-    filmGrain: 0.024,
-    chromaticAberration: 0.0018,
-    dynamicResolution: true,
-  },
-  showClockInImmersion: true,
-  clock24h: true,
-  brightness: 100,
-  wakeLockPreferred: true,
-  strictNoHud: false,
-  oledClockOpacity: 0.30,
-  powerProfile: 'smooth',
-};
 
 const ALL_SCENE_IDS: SpatialSceneId[] = [
   'fluid-data',
@@ -48,7 +54,51 @@ const ALL_SCENE_IDS: SpatialSceneId[] = [
   'oled-void',
 ];
 
-const ALL_POWER_PROFILES: PowerProfile[] = ['eco', 'smooth', 'native'];
+const defaultFavorites: SpatialSceneId[] = [
+  'arctic-aurora',
+  'moonlit-shore',
+  'midnight-cruise',
+  'nocturne-glass',
+  'event-horizon',
+  'volumetric-megacity',
+  'carina-nebula',
+  'binary-pulsar',
+  'saturnian-orbit',
+  'abyssal-drift',
+  'fluid-data',
+  'deep-void-drift',
+];
+
+const defaultPrefs: PersistedPrefs = {
+  activeScene: 'event-horizon',
+  postFX: {
+    bloomMultiplier: 1.0,
+    filmGrain: 0.024,
+    chromaticAberration: 0.0018,
+    dynamicResolution: true,
+  },
+  showClockInImmersion: true,
+  clock24h: true,
+  brightness: 100,
+  wakeLockPreferred: true,
+  strictNoHud: false,
+  oledClockOpacity: 0.30,
+  powerProfile: 'smooth',
+  audioEnabled: false,
+  audioVolume: 0.35,
+  autoCycleInterval: 'off',
+  autoCycleFavoritesOnly: false,
+  autoCycleShuffle: false,
+  favoriteScenes: defaultFavorites,
+  sleepTimer: 'off',
+  clockTheme: 'minimal-sans',
+  clockShowDate: true,
+  clockShowSeconds: false,
+  clockOpacity: 0.85,
+  motionSpeed: 1.0,
+  ambientDimmer: 1.0,
+  subtleParallax: true,
+};
 
 function loadPrefs(): PersistedPrefs {
   try {
@@ -61,9 +111,9 @@ function loadPrefs(): PersistedPrefs {
         activeScene: ALL_SCENE_IDS.includes(parsed.activeScene)
           ? parsed.activeScene
           : defaultPrefs.activeScene,
-        powerProfile: ALL_POWER_PROFILES.includes(parsed.powerProfile)
-          ? parsed.powerProfile
-          : defaultPrefs.powerProfile,
+        favoriteScenes: Array.isArray(parsed.favoriteScenes)
+          ? parsed.favoriteScenes.filter((id: SpatialSceneId) => ALL_SCENE_IDS.includes(id))
+          : defaultPrefs.favoriteScenes,
         postFX: {
           ...defaultPrefs.postFX,
           ...(parsed.postFX || {}),
@@ -88,11 +138,18 @@ export interface SpatialState extends PersistedPrefs {
   isImmersed: boolean;
   expandingSceneId: SpatialSceneId | null;
   settingsOpen: boolean;
-  audioEnabled: boolean;
+  shortcutsOpen: boolean;
   wakeLockStatus: 'active' | 'inactive' | 'unsupported';
   telemetry: EngineTelemetry;
   noHud: boolean;
   noHudRevealed: boolean;
+
+  // Focus / Pomodoro Mode
+  focusActive: boolean;
+  focusMode: FocusModeType;
+  focusDuration: number;
+  focusRemaining: number;
+  focusIsBreak: boolean;
 
   // Actions
   setActiveScene: (id: SpatialSceneId) => void;
@@ -100,7 +157,11 @@ export interface SpatialState extends PersistedPrefs {
   setImmersed: (immersed: boolean) => void;
   toggleImmersed: () => void;
   setSettingsOpen: (open: boolean) => void;
+  setShortcutsOpen: (open: boolean) => void;
+  toggleShortcutsOpen: () => void;
   setAudioEnabled: (enabled: boolean) => void;
+  toggleAudioEnabled: () => void;
+  setAudioVolume: (volume: number) => void;
   setWakeLockStatus: (status: 'active' | 'inactive' | 'unsupported') => void;
   setWakeLockPreferred: (preferred: boolean) => void;
   updatePostFX: (partial: Partial<PostFXSettings>) => void;
@@ -114,6 +175,31 @@ export interface SpatialState extends PersistedPrefs {
   setStrictNoHud: (strict: boolean) => void;
   setOledClockOpacity: (opacity: number) => void;
   setPowerProfile: (profile: PowerProfile) => void;
+
+  // Cinema Tour & Sleep Timer
+  setAutoCycleInterval: (val: AutoCycleInterval) => void;
+  setAutoCycleFavoritesOnly: (val: boolean) => void;
+  setAutoCycleShuffle: (val: boolean) => void;
+  toggleFavoriteScene: (id: SpatialSceneId) => void;
+  setSleepTimer: (val: SleepTimerDuration) => void;
+
+  // Clock Customization
+  setClockTheme: (theme: ClockTheme) => void;
+  setClockShowDate: (show: boolean) => void;
+  setClockShowSeconds: (show: boolean) => void;
+  setClockOpacity: (opacity: number) => void;
+
+  // Atmosphere Tuning & Parallax
+  setMotionSpeed: (speed: number) => void;
+  setAmbientDimmer: (dimmer: number) => void;
+  setSubtleParallax: (parallax: boolean) => void;
+
+  // Focus Mode Actions
+  startFocus: (mode?: FocusModeType, customMinutes?: number) => void;
+  pauseFocus: () => void;
+  resumeFocus: () => void;
+  resetFocus: () => void;
+  tickFocus: () => void;
 }
 
 const initial = loadPrefs();
@@ -129,6 +215,20 @@ function persistFromState(s: SpatialState): void {
     strictNoHud: s.strictNoHud,
     oledClockOpacity: s.oledClockOpacity,
     powerProfile: s.powerProfile,
+    audioEnabled: s.audioEnabled,
+    audioVolume: s.audioVolume,
+    autoCycleInterval: s.autoCycleInterval,
+    autoCycleFavoritesOnly: s.autoCycleFavoritesOnly,
+    autoCycleShuffle: s.autoCycleShuffle,
+    favoriteScenes: s.favoriteScenes,
+    sleepTimer: s.sleepTimer,
+    clockTheme: s.clockTheme,
+    clockShowDate: s.clockShowDate,
+    clockShowSeconds: s.clockShowSeconds,
+    clockOpacity: s.clockOpacity,
+    motionSpeed: s.motionSpeed,
+    ambientDimmer: s.ambientDimmer,
+    subtleParallax: s.subtleParallax,
   });
 }
 
@@ -137,10 +237,15 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
   isImmersed: false,
   expandingSceneId: null,
   settingsOpen: false,
-  audioEnabled: false,
+  shortcutsOpen: false,
   wakeLockStatus: 'inactive',
   noHud: false,
   noHudRevealed: false,
+  focusActive: false,
+  focusMode: '25/5',
+  focusDuration: 25 * 60,
+  focusRemaining: 25 * 60,
+  focusIsBreak: false,
   telemetry: {
     fps: 60,
     pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
@@ -185,9 +290,24 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
   },
 
   setSettingsOpen: (open) => set({ settingsOpen: open }),
-  setAudioEnabled: (enabled) => set({ audioEnabled: enabled }),
-  setWakeLockStatus: (status) => set({ wakeLockStatus: status }),
+  setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
+  toggleShortcutsOpen: () => set((s) => ({ shortcutsOpen: !s.shortcutsOpen })),
 
+  setAudioEnabled: (enabled) => {
+    set({ audioEnabled: enabled });
+    persistFromState(get());
+  },
+  toggleAudioEnabled: () => {
+    set((s) => ({ audioEnabled: !s.audioEnabled }));
+    persistFromState(get());
+  },
+  setAudioVolume: (volume) => {
+    const clamped = Math.max(0, Math.min(1, volume));
+    set({ audioVolume: clamped });
+    persistFromState(get());
+  },
+
+  setWakeLockStatus: (status) => set({ wakeLockStatus: status }),
   setWakeLockPreferred: (preferred) => {
     set({ wakeLockPreferred: preferred });
     persistFromState(get());
@@ -203,17 +323,14 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
     set({ showClockInImmersion: show });
     persistFromState(get());
   },
-
   setClock24h: (use24h) => {
     set({ clock24h: use24h });
     persistFromState(get());
   },
-
   setBrightness: (val) => {
     set({ brightness: Math.max(20, Math.min(100, val)) });
     persistFromState(get());
   },
-
   setTelemetry: (telemetry) => set({ telemetry }),
 
   setNoHud: (noHud) => set({ noHud }),
@@ -231,5 +348,108 @@ export const useSpatialStore = create<SpatialState>((set, get) => ({
   setPowerProfile: (powerProfile) => {
     set({ powerProfile });
     persistFromState(get());
+  },
+
+  // Cinema Tour & Sleep Timer Actions
+  setAutoCycleInterval: (autoCycleInterval) => {
+    set({ autoCycleInterval });
+    persistFromState(get());
+  },
+  setAutoCycleFavoritesOnly: (autoCycleFavoritesOnly) => {
+    set({ autoCycleFavoritesOnly });
+    persistFromState(get());
+  },
+  setAutoCycleShuffle: (autoCycleShuffle) => {
+    set({ autoCycleShuffle });
+    persistFromState(get());
+  },
+  toggleFavoriteScene: (id) => {
+    const current = get().favoriteScenes;
+    const exists = current.includes(id);
+    const updated = exists ? current.filter((x) => x !== id) : [...current, id];
+    set({ favoriteScenes: updated });
+    persistFromState(get());
+  },
+  setSleepTimer: (sleepTimer) => {
+    set({ sleepTimer });
+    persistFromState(get());
+  },
+
+  // Clock Customization Actions
+  setClockTheme: (clockTheme) => {
+    set({ clockTheme });
+    persistFromState(get());
+  },
+  setClockShowDate: (clockShowDate) => {
+    set({ clockShowDate });
+    persistFromState(get());
+  },
+  setClockShowSeconds: (clockShowSeconds) => {
+    set({ clockShowSeconds });
+    persistFromState(get());
+  },
+  setClockOpacity: (clockOpacity) => {
+    const clamped = Math.max(0.15, Math.min(1.0, clockOpacity));
+    set({ clockOpacity: clamped });
+    persistFromState(get());
+  },
+
+  // Atmosphere Tuning & Parallax Actions
+  setMotionSpeed: (motionSpeed) => {
+    const clamped = Math.max(0.25, Math.min(2.0, motionSpeed));
+    set({ motionSpeed: clamped });
+    persistFromState(get());
+  },
+  setAmbientDimmer: (ambientDimmer) => {
+    const clamped = Math.max(0.40, Math.min(1.20, ambientDimmer));
+    set({ ambientDimmer: clamped });
+    persistFromState(get());
+  },
+  setSubtleParallax: (subtleParallax) => {
+    set({ subtleParallax });
+    persistFromState(get());
+  },
+
+  // Focus Mode Actions
+  startFocus: (mode = '25/5', customMinutes) => {
+    let dur = 25 * 60;
+    if (mode === '50/10') dur = 50 * 60;
+    else if (mode === 'custom' && customMinutes) dur = Math.max(1, customMinutes) * 60;
+
+    set({
+      focusActive: true,
+      focusMode: mode,
+      focusDuration: dur,
+      focusRemaining: dur,
+      focusIsBreak: false,
+    });
+  },
+  pauseFocus: () => set({ focusActive: false }),
+  resumeFocus: () => set({ focusActive: true }),
+  resetFocus: () =>
+    set((s) => ({
+      focusActive: false,
+      focusRemaining: s.focusDuration,
+      focusIsBreak: false,
+    })),
+  tickFocus: () => {
+    const s = get();
+    if (!s.focusActive) return;
+    if (s.focusRemaining > 1) {
+      set({ focusRemaining: s.focusRemaining - 1 });
+    } else {
+      // Switch between focus and break
+      const nextIsBreak = !s.focusIsBreak;
+      let nextDuration = 5 * 60;
+      if (nextIsBreak) {
+        nextDuration = s.focusMode === '50/10' ? 10 * 60 : 5 * 60;
+      } else {
+        nextDuration = s.focusDuration;
+      }
+      set({
+        focusIsBreak: nextIsBreak,
+        focusRemaining: nextDuration,
+      });
+    }
   },
 }));

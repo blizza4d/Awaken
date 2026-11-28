@@ -17,6 +17,17 @@ export type SpatialSceneId =
 
 export type PowerProfile = 'eco' | 'smooth' | 'native';
 
+export type ClockTheme =
+  | 'minimal-sans'
+  | 'editorial-serif'
+  | 'mono-telemetry'
+  | 'centered-hero'
+  | 'hidden';
+
+export type AutoCycleInterval = 'off' | '5m' | '15m' | '30m' | '60m';
+export type SleepTimerDuration = 'off' | '30m' | '1h' | '2h';
+export type FocusModeType = '25/5' | '50/10' | 'custom';
+
 export interface BloomPreset {
   strength: number;
   radius: number;

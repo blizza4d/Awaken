@@ -21,7 +21,7 @@ const SAFE_ZONES: SafeZone[] = [
 ];
 
 export const OledVoidView: React.FC = () => {
-  const { clock24h, oledClockOpacity, activeScene } = useSpatialStore();
+  const { clock24h, oledClockOpacity, activeScene, clockTheme, clockShowDate } = useSpatialStore();
   const [zoneIndex, setZoneIndex] = useState(0);
 
   const [timeState, setTimeState] = useState(() => {
@@ -89,9 +89,18 @@ export const OledVoidView: React.FC = () => {
     return () => window.clearInterval(shiftInterval);
   }, []);
 
-  if (activeScene !== 'oled-void') return null;
+  if (activeScene !== 'oled-void' || clockTheme === 'hidden') return null;
 
   const currentZone = SAFE_ZONES[zoneIndex];
+
+  let fontClasses = 'font-display font-extralight tracking-tight';
+  if (clockTheme === 'editorial-serif') {
+    fontClasses = 'font-serif font-extralight italic tracking-tight';
+  } else if (clockTheme === 'mono-telemetry') {
+    fontClasses = 'font-mono font-medium tracking-normal';
+  } else if (clockTheme === 'centered-hero') {
+    fontClasses = 'font-display font-thin tracking-[-0.05em]';
+  }
 
   return (
     <div
@@ -120,16 +129,20 @@ export const OledVoidView: React.FC = () => {
         }}
       >
         <div
-          className="font-display font-extralight tracking-tight text-white leading-none tabular-nums"
+          className={`${fontClasses} text-white leading-none tabular-nums`}
           style={{
-            fontSize: 'clamp(2.75rem, 6vw, 5.5rem)',
+            fontSize: clockTheme === 'centered-hero'
+              ? 'clamp(3.5rem, 8vw, 7.5rem)'
+              : 'clamp(2.75rem, 6vw, 5.5rem)',
           }}
         >
           {timeState.time}
         </div>
-        <div className="font-mono text-xs sm:text-sm uppercase tracking-[0.24em] text-white/70 mt-2">
-          {timeState.date}
-        </div>
+        {clockShowDate && (
+          <div className="font-mono text-xs sm:text-sm uppercase tracking-[0.24em] text-white/70 mt-2">
+            {timeState.date}
+          </div>
+        )}
         <div className="flex items-center gap-2 mt-3 font-mono text-[10px] tracking-[0.18em] uppercase text-emerald-400/60">
           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80 animate-pulse" />
           <span>0% GPU • IDLE • OLED SAFEGUARD #{zoneIndex + 1}/9</span>

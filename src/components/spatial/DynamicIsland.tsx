@@ -4,7 +4,7 @@ import { useSpatialStore } from '../../store/useSpatialStore';
 import { useSpatialWakeLock } from '../../hooks/useSpatialWakeLock';
 import { useFullscreen } from '../../hooks/useFullscreen';
 import { SPATIAL_SCENES, getSceneMeta } from '../../engine/sceneCatalog';
-import { spatialAudio } from '../../engine/spatialAudio';
+import { ambientAudio } from '../../audio/AmbientAudioEngine';
 import {
   Play,
   LayoutGrid,
@@ -30,6 +30,7 @@ export const DynamicIsland: React.FC = () => {
     setSettingsOpen,
     audioEnabled,
     setAudioEnabled,
+    audioVolume,
     telemetry,
     noHud,
     toggleNoHud,
@@ -61,19 +62,14 @@ export const DynamicIsland: React.FC = () => {
     }
   }, [activeScene, isExpanded]);
 
-  // Sync generative Web Audio soundscape with active scene
+  // Sync generative Web Audio soundscape with active scene and volume
   useEffect(() => {
+    ambientAudio.setVolume(audioVolume);
+    ambientAudio.setEnabled(audioEnabled);
     if (audioEnabled) {
-      spatialAudio.start(activeScene, 0.42);
-    } else {
-      spatialAudio.stop();
+      ambientAudio.setScene(activeScene);
     }
-    return () => {
-      if (!useSpatialStore.getState().audioEnabled) {
-        spatialAudio.stop();
-      }
-    };
-  }, [audioEnabled, activeScene]);
+  }, [audioEnabled, activeScene, audioVolume]);
 
   // Auto-collapse Dynamic Island into a sleek pill after 3.8s of inactivity
   useEffect(() => {

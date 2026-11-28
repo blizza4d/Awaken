@@ -267,7 +267,7 @@ export class NocturneGlassScene implements ISpatialScene {
   }
 
   public init(renderer: THREE.WebGLRenderer): void {
-    const size = renderer.getSize(new THREE.Vector2());
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
 
     this.quadGeo = new THREE.PlaneGeometry(2, 2);
     this.nocturneMat = new THREE.ShaderMaterial({
@@ -298,12 +298,15 @@ export class NocturneGlassScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
 
     if (this.nocturneMat) {
-      this.nocturneMat.uniforms.uResolution.value.set(width, height);
+      this.nocturneMat.uniforms.uResolution.value.set(
+        Math.max(1, Math.floor(width * dpr)),
+        Math.max(1, Math.floor(height * dpr))
+      );
     }
   }
 

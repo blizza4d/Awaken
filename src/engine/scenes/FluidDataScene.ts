@@ -75,7 +75,7 @@ const FLUID_FRAGMENT_SHADER = /* glsl */ `
 
     // Hairline caustic light edges along fold crests
     float causticWave = abs(sin((f + r.x * 0.8) * 6.28318));
-    float causticEdge = pow(1.0 - causticWave, 18.0) * smoothstep(0.2, 0.8, ribbon);
+    float causticEdge = pow(max(0.0, 1.0 - causticWave), 18.0) * smoothstep(0.2, 0.8, ribbon);
 
     // Translucent silk palette
     // 1. Deep sapphire base (#0a2e8c)
@@ -89,7 +89,7 @@ const FLUID_FRAGMENT_SHADER = /* glsl */ `
 
     // Smooth volumetric blend through silk layers
     vec3 silkColor = mix(sapphire, violet, clamp(r.x * 1.6, 0.0, 1.0));
-    silkColor = mix(silkColor, cyan, clamp(pow(r.y, 2.0) * 1.4, 0.0, 1.0));
+    silkColor = mix(silkColor, cyan, clamp(r.y * r.y * 1.4, 0.0, 1.0));
 
     // Combine ribbons with delicate gold caustics
     vec3 finalColor = silkColor * (ribbon * 0.75 + secondaryRibbon * 0.45);
@@ -138,7 +138,7 @@ export class FluidDataScene implements ISpatialScene {
   }
 
   public init(renderer: THREE.WebGLRenderer): void {
-    const size = renderer.getSize(new THREE.Vector2());
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
 
     this.quadGeo = new THREE.PlaneGeometry(2, 2);
     this.fluidMat = new THREE.ShaderMaterial({
@@ -178,12 +178,15 @@ export class FluidDataScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
 
     if (this.fluidMat) {
-      this.fluidMat.uniforms.uResolution.value.set(width, height);
+      this.fluidMat.uniforms.uResolution.value.set(
+        Math.max(1, Math.floor(width * dpr)),
+        Math.max(1, Math.floor(height * dpr))
+      );
     }
   }
 

@@ -249,7 +249,7 @@ export class SpatialEngine {
 
       const nextScene = new SceneClass();
       nextScene.init(this.renderer);
-      nextScene.resize(this.width, this.height);
+      nextScene.resize(this.width, this.height, this.currentDpr);
       nextScene.setQuality(this.qualityScale);
       this.activeScene = nextScene;
 
@@ -305,6 +305,7 @@ export class SpatialEngine {
         Math.floor(this.width * this.currentDpr),
         Math.floor(this.height * this.currentDpr)
       );
+      this.activeScene?.resize(this.width, this.height, this.currentDpr);
     }
 
     if (qualityChanged) {
@@ -441,7 +442,7 @@ export class SpatialEngine {
       Math.floor(this.height * this.currentDpr)
     );
 
-    this.activeScene?.resize(this.width, this.height);
+    this.activeScene?.resize(this.width, this.height, this.currentDpr);
   };
 
   private handlePointerMove = (e: PointerEvent): void => {

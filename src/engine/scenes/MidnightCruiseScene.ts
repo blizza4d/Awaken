@@ -132,7 +132,8 @@ const CRUISE_FRAGMENT_SHADER = /* glsl */ `
     cabin = smax(cabin, fastbackCut, 0.042);
 
     // Smooth aerodynamic roof crown (peak height ~0.56 at x = -0.05)
-    float roofCurve = p.y - (0.565 - pow(p.x + 0.05, 2.0) * 0.32);
+    float rx = p.x + 0.05;
+    float roofCurve = p.y - (0.565 - rx * rx * 0.32);
     cabin = smax(cabin, roofCurve, 0.024);
 
     // Blend lower chassis with fastback cabin
@@ -172,7 +173,8 @@ const CRUISE_FRAGMENT_SHADER = /* glsl */ `
     // Fastback C-pillar inner slope
     float cCut = dot(p - vec2(-0.64, 0.35), normalize(vec2(-0.48, 0.88)));
     // Roof inner trim
-    float roofCut = p.y - (0.535 - pow(p.x + 0.05, 2.0) * 0.30);
+    float wrx = p.x + 0.05;
+    float roofCut = p.y - (0.535 - wrx * wrx * 0.30);
 
     float win = smax(winBox, wsCut, 0.022);
     win = smax(win, cCut, 0.025);
@@ -369,7 +371,8 @@ const CRUISE_FRAGMENT_SHADER = /* glsl */ `
       float shimmerBreakup = 0.55 + 0.45 * sin(roadDepth * 140.0 + grain * 45.0) * cos(roadTexUV.x * 3.5);
       for (int i = 0; i < 3; i++) {
         float lx = lampPositions[i];
-        float streakX = exp(-pow(uv.x - lx, 2.0) * 28.0);
+        float dx = uv.x - lx;
+        float streakX = exp(-dx * dx * 28.0);
         float streakY = smoothstep(roadTopY, -0.34, uv.y) * smoothstep(-0.46, -0.22, uv.y);
         roadReflections += amberLamp * streakX * streakY * shimmerBreakup * 0.28;
       }
@@ -433,8 +436,9 @@ const CRUISE_FRAGMENT_SHADER = /* glsl */ `
         vec2 lampScreen = vec2(lx, 0.168);
         vec2 toLamp = normalize(lampScreen - uv);
         float lambertRim = max(0.0, dot(n, toLamp));
-        float prox = exp(-pow(uv.x - lx, 2.0) * 6.5);
-        rimSweep += amberLamp * pow(lambertRim, 4.0) * edgeBand * prox * 0.95;
+        float rdx = uv.x - lx;
+        float prox = exp(-rdx * rdx * 6.5);
+        rimSweep += amberLamp * pow(max(0.0, lambertRim), 4.0) * edgeBand * prox * 0.95;
       }
 
       // Smoked glass window cutout
@@ -485,7 +489,8 @@ const CRUISE_FRAGMENT_SHADER = /* glsl */ `
         // Traveling streetlight metallic glint on alloy spokes
         float glint = 0.0;
         for (int i = 0; i < 3; i++) {
-          glint += exp(-pow(uv.x - lampPositions[i], 2.0) * 10.0);
+          float gdx = uv.x - lampPositions[i];
+          glint += exp(-gdx * gdx * 10.0);
         }
         alloyCol += amberLamp * clamp(glint, 0.0, 1.0) * 0.35;
 
@@ -566,7 +571,7 @@ export class MidnightCruiseScene implements ISpatialScene {
   }
 
   public init(renderer: THREE.WebGLRenderer): void {
-    const size = renderer.getSize(new THREE.Vector2());
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
 
     this.quadGeo = new THREE.PlaneGeometry(2, 2);
     this.cruiseMat = new THREE.ShaderMaterial({
@@ -597,12 +602,15 @@ export class MidnightCruiseScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
 
     if (this.cruiseMat) {
-      this.cruiseMat.uniforms.uResolution.value.set(width, height);
+      this.cruiseMat.uniforms.uResolution.value.set(
+        Math.max(1, Math.floor(width * dpr)),
+        Math.max(1, Math.floor(height * dpr))
+      );
     }
   }
 

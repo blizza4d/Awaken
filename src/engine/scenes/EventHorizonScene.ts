@@ -337,6 +337,8 @@ export class EventHorizonScene implements ISpatialScene {
   }
 
   public init(renderer: THREE.WebGLRenderer): void {
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+
     // 1. Full-Screen Gravitational Lensing Raymarching Quad
     this.raymarchGeo = new THREE.PlaneGeometry(2, 2);
     this.raymarchMat = new THREE.ShaderMaterial({
@@ -344,7 +346,7 @@ export class EventHorizonScene implements ISpatialScene {
       fragmentShader: RAYMARCH_FRAGMENT_SHADER,
       uniforms: {
         uTime: { value: 0 },
-        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uResolution: { value: new THREE.Vector2(size.x, size.y) },
         uCamPos: { value: new THREE.Vector3() },
         uCamRight: { value: new THREE.Vector3(1, 0, 0) },
         uCamUp: { value: new THREE.Vector3(0, 1, 0) },
@@ -449,11 +451,17 @@ export class EventHorizonScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
     if (this.raymarchMat) {
-      this.raymarchMat.uniforms.uResolution.value.set(width, height);
+      this.raymarchMat.uniforms.uResolution.value.set(
+        Math.max(1, Math.floor(width * dpr)),
+        Math.max(1, Math.floor(height * dpr))
+      );
+    }
+    if (this.diskMat) {
+      this.diskMat.uniforms.uPixelRatio.value = dpr;
     }
   }
 

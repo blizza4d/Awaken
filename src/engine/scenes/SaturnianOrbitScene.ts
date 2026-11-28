@@ -98,7 +98,7 @@ const SATURN_PLANET_FRAG = /* glsl */ `
     }
 
     // Delicate, restrained atmospheric limb Fresnel (prevents blinding white halo)
-    float fresnel = 1.0 - max(dot(N, V), 0.0);
+    float fresnel = max(0.0, 1.0 - max(dot(N, V), 0.0));
     float rimGlow = pow(fresnel, 4.2) * max(NdotL + 0.15, 0.0);
     vec3 rimColor = mix(vec3(0.32, 0.60, 0.82), vec3(0.82, 0.68, 0.45), clamp(NdotL, 0.0, 1.0));
 
@@ -347,11 +347,11 @@ export class SaturnianOrbitScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
     if (this.starfieldMat) {
-      this.starfieldMat.uniforms.uPixelRatio.value = Math.min(window.devicePixelRatio || 1, 2);
+      this.starfieldMat.uniforms.uPixelRatio.value = dpr;
     }
   }
 

@@ -349,9 +349,12 @@ export class CarinaNebulaScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+    if (this.starMat) {
+      this.starMat.uniforms.uPixelRatio.value = dpr;
+    }
   }
 
   public setQuality(scale: number): void {

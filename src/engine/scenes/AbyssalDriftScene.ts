@@ -56,7 +56,7 @@ const JELLY_BELL_FRAG = /* glsl */ `
   void main() {
     float NdotV = max(0.0, dot(normalize(vNormal), normalize(vViewDir)));
     // High-power Fresnel edge glow
-    float fresnel = pow(1.0 - NdotV, 2.6);
+    float fresnel = pow(max(0.0, 1.0 - NdotV), 2.6);
 
     // Bioluminescent radial veins running down the bell
     float angle = atan(vWorldPos.x, vWorldPos.z);
@@ -127,7 +127,7 @@ const TENTACLE_FRAG = /* glsl */ `
 
   void main() {
     float NdotV = max(0.0, dot(normalize(vNormal), normalize(vViewDir)));
-    float fresnel = pow(1.0 - NdotV, 2.2);
+    float fresnel = pow(max(0.0, 1.0 - NdotV), 2.2);
 
     // Fade delicately towards trailing tip
     float tipFade = smoothstep(1.0, 0.15, vProgress);

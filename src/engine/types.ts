@@ -80,7 +80,7 @@ export interface ISpatialScene {
   readonly isFullScreenShader?: boolean;
   init(renderer: THREE.WebGLRenderer): void;
   update(delta: number, elapsed: number, pointer: THREE.Vector2): void;
-  resize(width: number, height: number): void;
+  resize(width: number, height: number, dpr?: number): void;
   setQuality(scale: number): void;
   getActiveInstanceCount(): number;
   dispose(): void;

@@ -658,12 +658,12 @@ export class MoonlitShoreScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
 
     if (this.starfieldMat) {
-      this.starfieldMat.uniforms.uPixelRatio.value = Math.min(window.devicePixelRatio || 1, 2);
+      this.starfieldMat.uniforms.uPixelRatio.value = dpr;
     }
   }
 

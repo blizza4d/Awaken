@@ -34,7 +34,7 @@ const NEUTRON_STAR_FRAG = /* glsl */ `
 
     // Fresnel edge emission
     float nDotV = max(dot(viewDir, normal), 0.0);
-    float fresnel = 1.0 - nDotV;
+    float fresnel = max(0.0, 1.0 - nDotV);
     float rim = pow(fresnel, 2.5);
 
     // High-frequency magnetic turbulence ripple
@@ -42,9 +42,9 @@ const NEUTRON_STAR_FRAG = /* glsl */ `
     float pulse = 0.92 + 0.12 * sin(uTime * uPulseRate * 1.8);
 
     // Preserved distinct chromatic identity per star core (prevents bloom blowout merge)
-    float coreFalloff = pow(nDotV, 2.2);
+    float coreFalloff = pow(max(nDotV, 0.0), 2.2);
     vec3 emissive = mix(uLimbColor, uCoreColor, coreFalloff * 0.75 + 0.20) * (0.85 + ripple * 0.22) * pulse;
-    emissive += uCoreColor * pow(nDotV, 5.5) * 0.45;
+    emissive += uCoreColor * pow(max(nDotV, 0.0), 5.5) * 0.45;
     emissive += uLimbColor * rim * 0.65;
 
     // Soft HDR shoulder compression preserves rich star hues
@@ -425,9 +425,12 @@ export class BinaryPulsarScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
+    if (this.jetMat) {
+      this.jetMat.uniforms.uPixelRatio.value = dpr;
+    }
   }
 
   public setQuality(scale: number): void {

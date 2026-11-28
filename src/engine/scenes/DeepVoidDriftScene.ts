@@ -207,9 +207,9 @@ const STELLAR_SPHERE_FRAG = /* glsl */ `
 
   void main() {
     float NdotV = max(0.0, dot(vNormal, vViewDir));
-    float limb = pow(NdotV, 0.45);
+    float limb = pow(max(NdotV, 0.0), 0.45);
     float grain = hash(vUv * 48.0 + fract(uTime * 0.03)) * 0.12;
-    vec3 col = uColor * (0.88 + grain + pow(NdotV, 1.8) * 0.65);
+    vec3 col = uColor * (0.88 + grain + pow(max(NdotV, 0.0), 1.8) * 0.65);
     gl_FragColor = vec4(col * (0.75 + limb * 0.85), 1.0);
   }
 `;
@@ -304,7 +304,7 @@ const RED_GIANT_FRAG = /* glsl */ `
 
   void main() {
     float NdotV = max(0.0, dot(vNormal, vViewDir));
-    float limb = pow(NdotV, 0.42);
+    float limb = pow(max(NdotV, 0.0), 0.42);
 
     // Convective boiling granulation cells on photospheric surface
     vec3 samplePos = vPosition * 4.2 + vec3(uTime * 0.04, uTime * 0.03, uTime * 0.02);
@@ -320,7 +320,7 @@ const RED_GIANT_FRAG = /* glsl */ `
     surfaceColor = mix(surfaceColor, hotFilament, smoothstep(0.68, 0.88, cells + fineGrain));
 
     // Coronal limb glow (warm crimson/gold rim)
-    float rim = pow(1.0 - NdotV, 2.2);
+    float rim = pow(max(0.0, 1.0 - NdotV), 2.2);
     vec3 rimColor = vec3(1.0, 0.25, 0.05) * rim * 1.8;
 
     vec3 finalCol = surfaceColor * (0.45 + limb * 0.85) + rimColor;
@@ -395,6 +395,8 @@ export class DeepVoidDriftScene implements ISpatialScene {
   }
 
   public init(renderer: THREE.WebGLRenderer): void {
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+
     // 1. Subtle Deep-Space Dust Gradient Quad
     this.dustGeo = new THREE.PlaneGeometry(2, 2);
     this.dustMat = new THREE.ShaderMaterial({
@@ -402,7 +404,7 @@ export class DeepVoidDriftScene implements ISpatialScene {
       fragmentShader: VOID_DUST_FRAG,
       uniforms: {
         uTime: { value: 0 },
-        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        uResolution: { value: new THREE.Vector2(size.x, size.y) },
       },
       depthWrite: false,
       depthTest: false,
@@ -659,11 +661,17 @@ export class DeepVoidDriftScene implements ISpatialScene {
     }
   }
 
-  public resize(width: number, height: number): void {
+  public resize(width: number, height: number, dpr = 1): void {
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
     if (this.dustMat) {
-      this.dustMat.uniforms.uResolution.value.set(width, height);
+      this.dustMat.uniforms.uResolution.value.set(
+        Math.max(1, Math.floor(width * dpr)),
+        Math.max(1, Math.floor(height * dpr))
+      );
+    }
+    if (this.starMat) {
+      this.starMat.uniforms.uPixelRatio.value = dpr;
     }
   }
 
